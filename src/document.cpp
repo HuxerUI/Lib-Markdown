@@ -34,8 +34,9 @@ void AppendCodepoint(std::string& out, std::uint32_t cp) {
   }
 }
 
-void ValidateUtf8(std::string_view input) {
+std::size_t ValidateUtf8(std::string_view input, bool allow_incomplete = false) {
   for (std::size_t i = 0; i < input.size();) {
+    const auto start = i;
     const auto lead = static_cast<unsigned char>(input[i++]);
     if (lead < 0x80) continue;
     unsigned remaining = 0;
@@ -44,15 +45,22 @@ void ValidateUtf8(std::string_view input) {
     else if (lead >= 0xE0 && lead <= 0xEF) { remaining = 2; cp = lead & 15; minimum = 0x800; }
     else if (lead >= 0xF0 && lead <= 0xF4) { remaining = 3; cp = lead & 7; minimum = 0x10000; }
     else throw std::invalid_argument("Markdown source must be valid UTF-8");
-    if (remaining > input.size() - i) throw std::invalid_argument("Truncated Markdown UTF-8");
-    while (remaining--) {
+    for (unsigned part = 0; part < remaining; ++part) {
+      if (i == input.size()) {
+        if (allow_incomplete) return start;
+        throw std::invalid_argument("Truncated Markdown UTF-8");
+      }
       const auto c = static_cast<unsigned char>(input[i++]);
       if ((c & 0xC0) != 0x80) throw std::invalid_argument("Invalid Markdown UTF-8 continuation");
+      if (part == 0 && ((lead == 0xE0 && c < 0xA0) || (lead == 0xED && c >= 0xA0) ||
+                        (lead == 0xF0 && c < 0x90) || (lead == 0xF4 && c >= 0x90)))
+        throw std::invalid_argument("Invalid Markdown Unicode scalar");
       cp = (cp << 6) | (c & 63);
     }
     if (cp < minimum || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF))
       throw std::invalid_argument("Invalid Markdown Unicode scalar");
   }
+  return input.size();
 }
 
 std::string DecodeEntity(std::string_view value) {
@@ -423,6 +431,10 @@ MarkdownDocument MarkdownParseSession::Update(std::string_view source) {
   return next;
 }
 
+MarkdownDocument MarkdownParseSession::Append(std::string_view text) {
+  return ApplyEdit({impl_->source.size(), 0, std::string(text)});
+}
+
 MarkdownDocument MarkdownParseSession::ApplyEdit(const MarkdownEdit& edit) {
   const auto& source = impl_->source;
   if (edit.start_byte > source.size() || edit.removed_bytes > source.size() - edit.start_byte)
@@ -439,6 +451,42 @@ MarkdownDocument MarkdownParseSession::ApplyEdit(const MarkdownEdit& edit) {
   auto next = source;
   next.replace(edit.start_byte, edit.removed_bytes, edit.inserted_text);
   return Update(next);
+}
+
+struct MarkdownStream::Impl {
+  explicit Impl(ParseOptions options) : parser(options), limit(std::min<std::size_t>(
+      options.max_input_bytes, std::numeric_limits<MD_SIZE>::max())) {}
+  MarkdownParseSession parser;
+  std::size_t limit;
+  std::string pending;
+  bool finished = false;
+};
+
+MarkdownStream::MarkdownStream(ParseOptions options) : impl_(std::make_unique<Impl>(options)) {}
+MarkdownStream::~MarkdownStream() = default;
+std::string_view MarkdownStream::Source() const noexcept { return impl_->parser.Source(); }
+const MarkdownDocument& MarkdownStream::Document() const noexcept { return impl_->parser.Document(); }
+MarkdownParseStats MarkdownStream::LastParseStats() const noexcept { return impl_->parser.LastParseStats(); }
+std::size_t MarkdownStream::PendingByteCount() const noexcept { return impl_->pending.size(); }
+bool MarkdownStream::IsFinished() const noexcept { return impl_->finished; }
+
+MarkdownDocument MarkdownStream::Append(std::string_view bytes) {
+  if (impl_->finished) throw std::logic_error("Markdown stream is finished");
+  if (bytes.size() > impl_->limit - Source().size() - impl_->pending.size())
+    throw std::length_error("Markdown input limit exceeded");
+  auto combined = impl_->pending;
+  combined.append(bytes);
+  const auto complete = ValidateUtf8(combined, true);
+  auto pending = combined.substr(complete);
+  auto next = complete ? impl_->parser.Append(std::string_view(combined).substr(0, complete)) : Document();
+  impl_->pending.swap(pending);
+  return next;
+}
+
+MarkdownDocument MarkdownStream::Finish() {
+  if (!impl_->pending.empty()) throw std::invalid_argument("Truncated Markdown stream UTF-8");
+  impl_->finished = true;
+  return Document();
 }
 
 bool IsDefaultLinkAllowed(std::string_view target) noexcept {

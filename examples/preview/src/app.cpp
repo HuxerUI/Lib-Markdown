@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <sstream>
 #include <chrono>
+#include <algorithm>
 
 namespace markdown_preview {
 using namespace huxerui;
@@ -66,6 +67,13 @@ struct PreviewSession {
   std::uint64_t request = 0;
   bool scheduled = false;
   std::string latest_source;
+  TaskHandle replay;
+  std::uint64_t replay_request = 0;
+
+  void CancelReplay() {
+    replay.Cancel();
+    ++replay_request;
+  }
 
   void CancelPending() {
     pending.Cancel();
@@ -117,6 +125,44 @@ void RequestPreview(const std::shared_ptr<PreviewSession>& session, TaskScope ta
   });
 }
 
+void StopReplay(const std::shared_ptr<PreviewSession>& session, State<bool> streaming) {
+  session->CancelReplay();
+  streaming = false;
+}
+
+void StartReplay(const std::shared_ptr<PreviewSession>& session, TaskScope tasks, std::string source,
+                 State<TextEditingValue> editor, State<MarkdownDocument> document,
+                 State<MarkdownParseStats> stats, State<std::string> message, State<bool> streaming) {
+  session->CancelPending();
+  StopReplay(session, streaming);
+  const auto request = session->replay_request;
+  editor = SourceValue("");
+  document = MarkdownDocument{};
+  stats = MarkdownParseStats{};
+  streaming = true;
+  message = "流式重放中…";
+  session->replay = tasks.Launch([=]() mutable -> Task<void> {
+    MarkdownStream stream;
+    try {
+      for (std::size_t offset = 0; offset < source.size();) {
+        co_await Delay(std::chrono::milliseconds(40));
+        if (session->replay_request != request) co_return;
+        const auto count = std::min<std::size_t>(48, source.size() - offset);
+        document = stream.Append(std::string_view(source).substr(offset, count));
+        offset += count;
+        stats = stream.LastParseStats();
+        editor = SourceValue(std::string(stream.Source()));
+        message = "流式重放：" + std::to_string(offset) + "/" + std::to_string(source.size()) + " 字节";
+      }
+      document = stream.Finish();
+      message = "流式重放完成";
+    } catch (const std::exception& error) {
+      message = std::string("流式解析失败：") + error.what();
+    }
+    streaming = false;
+  });
+}
+
 View App() {
   static const auto initial_document = ParseMarkdown(Samples()[0].source);
   auto selected = UseState(std::size_t{0});
@@ -124,6 +170,8 @@ View App() {
   auto show_source = UseState(true);
   auto custom = UseState(false);
   auto live = UseState(true);
+  auto virtualized = UseState(false);
+  auto streaming = UseState(false);
   auto session = UseState(std::make_shared<PreviewSession>());
   auto tasks = UseTaskScope();
   auto editor = UseState(SourceValue(Samples()[0].source));
@@ -134,7 +182,7 @@ View App() {
   Lifecycle([=]() mutable {
     (void)session.Get()->parser.Update(Samples()[0].source);
     stats = session.Get()->parser.LastParseStats();
-    return [session] { session.Get()->CancelPending(); };
+    return [session] { session.Get()->CancelPending(); session.Get()->CancelReplay(); };
   });
 
   return MaterialTheme(dark.Get() ? MaterialDarkThemeSpec() : MaterialLightThemeSpec(), Scope([=] {
@@ -144,6 +192,7 @@ View App() {
     for (std::size_t i = 0; i < Samples().size(); ++i) {
       samples.push_back(Chip(Samples()[i].name, selected.Get() == i)
           .OnChanged([=](bool) mutable {
+            StopReplay(session.Get(), streaming);
             selected = i;
             editor = SourceValue(Samples()[i].source);
             RequestPreview(session.Get(), tasks, Samples()[i].source, document, stats, message, true);
@@ -158,10 +207,14 @@ View App() {
       options.standalone_image_renderer = [theme](const MarkdownNode& image) { return LocalImage(image, theme); };
     }
 
-    View preview = Panel("渲染预览", ScrollView(Markdown(document.Get(), std::move(options))
+    View rendered = virtualized.Get() ? VirtualizedMarkdown(document.Get(), std::move(options))
+                                    : Markdown(document.Get(), std::move(options));
+    rendered = std::move(rendered)
         .On<MarkdownEvents::LinkActivated>([message](const MarkdownLinkActivation& event) mutable {
           message = "链接：" + event.destination;
-        }))
+        });
+    if (!virtualized.Get()) rendered = ScrollView(std::move(rendered));
+    View preview = Panel("渲染预览", std::move(rendered)
         .With(ScrollBar{}).Key("preview-scroll"), theme)
         .Key(document_version.Get());
     View body = std::move(preview);
@@ -173,6 +226,7 @@ View App() {
             const bool changed = next.text != editor.Get().text;
             editor = next;
             if (!changed) return;
+            StopReplay(session.Get(), streaming);
             if (live.Get()) RequestPreview(session.Get(), tasks, next.text, document, stats, message);
             else session.Get()->CancelPending();
           })
@@ -195,9 +249,11 @@ View App() {
       Flow(std::move(samples)).With(Spacing(8.0F)),
       Flow{
         Button("渲染").OnClick([=]() mutable {
+          StopReplay(session.Get(), streaming);
           RequestPreview(session.Get(), tasks, editor.Get().text, document, stats, message, true);
         }).Key("render"),
         Button("重置样例").OnClick([=]() mutable {
+          StopReplay(session.Get(), streaming);
           editor = SourceValue(Samples()[selected.Get()].source);
           RequestPreview(session.Get(), tasks, Samples()[selected.Get()].source, document, stats, message, true);
           document_version = document_version.Get() + 1;
@@ -212,6 +268,19 @@ View App() {
           if (enabled) RequestPreview(session.Get(), tasks, editor.Get().text, document, stats, message);
           else { session.Get()->CancelPending(); message = "实时预览已暂停，点击渲染手动更新。"; }
         }).Key("live-toggle"),
+        Checkbox("虚拟化", virtualized.Get()).OnChanged([virtualized](bool enabled) mutable {
+          virtualized = enabled;
+        }).Key("virtual-toggle"),
+        Button(streaming.Get() ? "停止流式" : "流式重放").OnClick([=]() mutable {
+          if (streaming.Get()) {
+            StopReplay(session.Get(), streaming);
+            message = "已停止流式重放";
+          } else {
+            StartReplay(session.Get(), tasks, Samples()[selected.Get()].source,
+                        editor, document, stats, message, streaming);
+            document_version = document_version.Get() + 1;
+          }
+        }).Key("stream-toggle"),
       }.With(Spacing(8.0F)),
       std::move(body).With(Grow{}),
       Text(message).With(Foreground{theme.colors.on_surface_variant}).Key("status"),

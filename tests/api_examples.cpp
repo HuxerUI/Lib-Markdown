@@ -47,4 +47,16 @@ View CustomImage(MarkdownDocument document) {
     return Text(PlainText(image));
   }});
 }
+
+MarkdownDocument Streamed() {
+  MarkdownStream stream;
+  (void)stream.Append("# Hello\n\n\xF0\x9F");
+  (void)stream.Append("\x98\x80\n");
+  return stream.Finish();
+}
+
+View VirtualArticle(MarkdownDocument document) {
+  return VirtualizedMarkdown(document, {}, {.estimated_block_extent = 72.0F})
+      .With(Frame{.height = 600.0F});
+}
 } // namespace markdown_examples

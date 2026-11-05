@@ -54,8 +54,32 @@ auto stats = parser.LastParseStats();
 编辑范围以 UTF-8 字节计数，必须落在 Unicode 标量边界，不能直接使用 UI 的 UTF-16
 选区偏移。会话复用安全边界之前的块并重解析尾部；引用定义或无法确认安全边界时全量解析。
 相同输入保留快照身份；失败保留上次成功的源码、快照和统计。会话同步执行，需串行访问。
-源码扫描和前部 AST 复制仍为线性开销，不代表增量渲染或虚拟化。
+源码扫描和前部 AST 复制仍为线性开销。虚拟化由独立视图提供。
 详见 [增量解析契约](docs/incremental-parsing.md)。
+
+## 流式追加与虚拟化
+
+```cpp
+MarkdownStream stream;
+auto document = stream.Append(chunk); // 接受任意字节分片，包括拆开的 UTF-8 字符。
+// 后续按顺序 Append；将快照发布到 UI State。
+document = stream.Finish();
+
+// 自带垂直滚动，需要有界高度，不再外套 ScrollView。
+return VirtualizedMarkdown(document, {}, {
+  .estimated_block_extent = 80.0F,
+  .cache_extent = 400.0F,
+}).With(Frame{.height = 600.0F});
+```
+
+流式接口暂存未完整的 UTF-8 字符，遇到非法输入保持旧状态；`Finish()` 检查截断字符并结束输入。
+已有完整 UTF-8 文本时，也可直接用 `MarkdownParseSession::Append(text)`。
+后续分片会重新解释未闭合结构与引用定义，仍使用正常 Markdown 语义。
+
+`VirtualizedMarkdown` 按顶层块测量高度并按需挂载，支持样式、链接和离屏全文复制；可通过
+`scroll_controller` 按顶层块索引定位。尾部追加保留阅读位置，视口上方插入暂不保证像素锚定。
+单个大型列表、表格或代码块内部不拆分，AST 和文本仍完整保存在内存中。
+详见 [流式与虚拟化契约](docs/streaming-and-virtualization.md)。
 
 ## 配置
 
@@ -82,7 +106,7 @@ renderer 在 UI 组合时执行，节点引用仅在回调期间借用，延迟�
 `std::length_error`；无效 UTF-8 会抛出 `std::invalid_argument`。
 
 任务复选框只读；表格使用固定列宽并支持横向滚动；默认代码块为可换行的等宽文本。
-组件本身不包含可复用编辑器、虚拟化、数学公式或 HTML 执行。增量解析由独立会话提供。
+组件本身不包含可复用编辑器、数学公式或 HTML 执行。增量解析由独立会话提供。
 
 ## 交互 Demo
 
@@ -90,6 +114,7 @@ renderer 在 UI 组合时执行，节点引用仅在回调期间借用，延迟�
 明暗主题、链接反馈和自定义代码/图片渲染。默认按 120 ms 窗口合并输入并刷新预览，
 持续输入也会更新，可关闭后点击
 「渲染」手动更新；底部显示重解析字节和复用块数。窄窗口自动上下排列。
+「虚拟化」切换按需挂载；「流式重放」每 40 ms 追加最多 48 字节，可随时停止，编辑或切换样例也会取消重放。
 
 ```sh
 cmake -S examples/preview -B build-preview -DHUXERUI_HOME=/path/to/HuxerUI

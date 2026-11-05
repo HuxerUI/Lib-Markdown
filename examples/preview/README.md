@@ -8,6 +8,8 @@
 - 五组样例：基础排版、列表与表格、链接与边界、自定义渲染、长文档。
 - 左侧编辑 Markdown，默认按 120 ms 窗口合并输入并更新右侧预览，长按连续输入也会刷新；可关闭「实时预览」后手动渲染。
 - 会话增量解析，底部显示全量/增量模式、重解析字节数和复用的顶层块数。
+- 「流式重放」以每 40 ms 最多 48 字节的分片重放当前样例，能处理 UTF-8 字符被拆开；再次点击停止。
+- 「虚拟化」启用可变高度顶层块列表，只挂载可见/缓存区域；支持离屏内容的全文复制。
 - 点击「重置样例」恢复原文，取消过期输入任务。
 - 明暗主题切换、隐藏/显示源码；窄窗口自动变成上下布局。
 - 原生文本选择和复制；相对地址、中文地址和锚点通过底部状态栏反馈。
@@ -15,7 +17,8 @@
 
 编辑器演示完整受控输入，`MarkdownParseSession` 接收完整源码并复用未受影响的前部块。
 窗口到期后在 UI 线程同步解析；大文档应用可自行串行调度到工作线程。引用定义等情况回退全量
-解析，失败保留上次成功预览。它没有虚拟化或节点级增量渲染。链接只显示回调，不会打开浏览器。
+解析，失败保留上次成功预览。虚拟化通过独立的 `VirtualizedMarkdown` 视图提供，不会拆分单个
+大型列表、表格或代码块。链接只显示回调，不会打开浏览器。
 图片示例仅识别 `demo:landscape`，
 不请求网络。组件默认渲染行为可以通过「自定义渲染」开关对比。
 
@@ -23,6 +26,10 @@ demo 使用 0.2 API：State 保存 `MarkdownDocument` 值，通过
 `.On<MarkdownEvents::LinkActivated>()` 处理链接，使用 `code_block_renderer` 和
 `standalone_image_renderer` 自定义显示。编辑与手动渲染保留滚动位置；切换或重置样例时使用
 demo 自己的版本号重置滚动。主题切换复用已有快照。升级请参考 [迁移说明](../../docs/migration-0.2.md)。
+
+流式重放独立于编辑器的实时预览开关，重放所选样例而非当前草稿。开始时清空预览；停止保留
+已接收的完整 UTF-8 内容。编辑、手动渲染、切换或重置样例会停止重放；隐藏源码、主题切换和
+切换虚拟化不会中断。虚拟化开关切换会重建预览滚动容器，尾部追加则保留阅读位置，不自动追随末尾。
 
 ## 独立构建
 
@@ -59,7 +66,7 @@ Windows/Visual Studio 输出位于 `build/examples/preview/Release/markdown_prev
 ## 交互测试
 
 HuxerUI 源码提供的无窗口测试库可以验证连续输入刷新、最新输入合并、过期任务取消、自动/手动切换、增量更新保留滚动、样例切换、重置、链接回调、
-主题切换、自定义渲染，以及窄窗口布局：
+主题切换、自定义渲染、虚拟列表滚动和增量更新、流式重放/停止/编辑取消，以及窄窗口布局：
 
 ```sh
 cmake -S examples/preview -B build-preview -DHUXERUI_HOME=/path/to/HuxerUI \
@@ -84,6 +91,8 @@ This standalone desktop demo uses the library's public API. Choose one of five
 samples and edit its Markdown. Live preview coalesces changes in cancellable 120 ms
 windows, refreshing during continuous typing;
 pause it for manual rendering. Statistics show tail parsing and prefix reuse.
+Toggle virtualization for measured, lazy top-level blocks or replay the selected
+sample as byte chunks with the streaming button; stop to retain partial content.
 It supports
 light/dark themes, a compact stacked layout, link callbacks, and custom code and
 image renderers. Links and images do not initiate network requests. Use the CMake

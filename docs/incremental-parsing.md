@@ -51,8 +51,10 @@ auto stats = parser.LastParseStats();
 | `total_blocks` | 新快照的顶层块数 |
 
 这是解析工作复用，不是每次更新整体 O(改动大小)。UTF-8 验证、源码比较/复制、引用标记扫描
-和保留 AST 的复制仍有线性开销。新快照没有持久化共享子树；renderer 仍按现有组件逻辑
-组合文档，没有可见区虚拟化或节点级增量挂载。越靠近文首的编辑，通常需要解析越多内容。
+和保留 AST 的复制仍有线性开销。新快照没有持久化共享子树；普通 `Markdown` 仍组合全文。
+可见区按需挂载由独立的 `VirtualizedMarkdown` 提供。越靠近文首的编辑，通常需要解析越多内容。
+任意字节流输入使用 `MarkdownStream`，完整文本追加可以用会话的 `Append()`；详见
+[流式与虚拟化契约](streaming-and-virtualization.md)。
 
 ## Demo 更新策略
 

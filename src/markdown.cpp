@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <utility>
+#include <unordered_map>
 
 #include "inline.h"
 
@@ -80,8 +81,11 @@ void ValidateStyle(const MarkdownStyle& theme) {
 
 class Renderer {
 public:
-  Renderer(const MarkdownOptions& options, MarkdownStyle theme, EventEmitter events)
-      : options_(options), theme_(std::move(theme)), events_(std::move(events)) {}
+  Renderer(const MarkdownOptions& options, MarkdownStyle theme, EventEmitter events,
+           const std::unordered_map<const MarkdownNode*, TextBlockId>* selection = nullptr)
+      : options_(options), theme_(std::move(theme)), events_(std::move(events)), selection_(selection) {}
+
+  View RenderBlock(const MarkdownNode& node) const { return Block(node); }
 
   View Blocks(const MarkdownNode& parent, float spacing) const {
     std::vector<View> children;
@@ -90,9 +94,14 @@ public:
   }
 
 private:
+  Text BindSelection(Text text, const MarkdownNode& node) const {
+    if (selection_) return std::move(text).SelectionBlock(selection_->at(&node));
+    return text;
+  }
+
   View Paragraph(const MarkdownNode& node, TextStyle style, TextAlign alignment = TextAlign::Leading) const {
     auto inline_text = detail::BuildInline(node, theme_, options_.link_policy);
-    return Text(std::move(inline_text.text)).Style(std::move(style)).Align(alignment)
+    return BindSelection(Text(std::move(inline_text.text)).Style(std::move(style)).Align(alignment), node)
         .On<TextEvents::LinkActivated>([events = events_, links = std::move(inline_text.links)](const TextLinkActivation& event) {
           for (const auto& link : links) {
             if (link.range == event.range) {
@@ -158,7 +167,7 @@ private:
       return Paragraph(node, theme_.body);
     case NodeKind::CodeBlock:
       if (options_.code_block_renderer) return options_.code_block_renderer(node);
-      return Text(node.text).Style(theme_.code)
+      return BindSelection(Text(node.text).Style(theme_.code), node)
           .With(Padding(theme_.code_padding), Background{theme_.code_background}, CornerRadius(theme_.corner_radius));
     case NodeKind::BlockQuote:
       return Blocks(node, theme_.block_spacing)
@@ -178,6 +187,96 @@ private:
   const MarkdownOptions& options_;
   MarkdownStyle theme_;
   EventEmitter events_;
+  const std::unordered_map<const MarkdownNode*, TextBlockId>* selection_;
+};
+
+// Owned block records avoid retaining an entire historical AST for each reused
+// block. Text bodies and records are shared between logical selection snapshots.
+struct VirtualBlock {
+  MarkdownNode node;
+  std::uint64_t id;
+  std::unordered_map<const MarkdownNode*, TextBlockId> bindings;
+  std::vector<TextBlockId> ids;
+  std::vector<TextSelectionBlock> paragraphs;
+
+  VirtualBlock(const MarkdownNode& value, std::uint64_t& next_id) : node(value), id(++next_id) {
+    Collect(node, next_id);
+  }
+
+  void Collect(const MarkdownNode& value, std::uint64_t& next_id) {
+    switch (value.kind) {
+    case NodeKind::Paragraph:
+    case NodeKind::Heading:
+    case NodeKind::TableCell:
+    case NodeKind::TableHeaderCell:
+    case NodeKind::CodeBlock: {
+      const auto text_id = ++next_id;
+      bindings.emplace(&value, text_id);
+      ids.push_back(text_id);
+      paragraphs.push_back({AttributedText(PlainText(value)), "\n"});
+      return;
+    }
+    default:
+      for (const auto& child : value.children) Collect(child, next_id);
+    }
+  }
+};
+
+class VirtualSnapshot final : public TextSelectionSource {
+public:
+  MarkdownDocument document;
+  std::vector<std::shared_ptr<const VirtualBlock>> blocks;
+
+  VirtualSnapshot(MarkdownDocument value, const std::shared_ptr<const VirtualSnapshot>& previous,
+                  std::uint64_t& next_id) : document(std::move(value)) {
+    const auto& nodes = document.Root().children;
+    blocks.resize(nodes.size());
+    std::size_t prefix = 0, suffix = 0;
+    if (previous) {
+      const auto& old = previous->blocks;
+      while (prefix < nodes.size() && prefix < old.size() && old[prefix]->node == nodes[prefix]) {
+        blocks[prefix] = old[prefix];
+        ++prefix;
+      }
+      while (suffix < nodes.size() - prefix && suffix < old.size() - prefix &&
+             old[old.size() - suffix - 1]->node == nodes[nodes.size() - suffix - 1]) {
+        blocks[nodes.size() - suffix - 1] = old[old.size() - suffix - 1];
+        ++suffix;
+      }
+    }
+    for (auto i = prefix; i < nodes.size() - suffix; ++i)
+      blocks[i] = std::make_shared<const VirtualBlock>(nodes[i], next_id);
+    for (const auto& block : blocks) {
+      for (std::size_t i = 0; i < block->ids.size(); ++i) {
+        indexes_.emplace(block->ids[i], positions_.size());
+        positions_.push_back({block, i});
+      }
+    }
+  }
+
+  std::size_t Count() const noexcept override { return positions_.size(); }
+  TextBlockId IdAt(std::size_t index) const override {
+    const auto& position = positions_.at(index);
+    return position.block->ids[position.paragraph];
+  }
+  std::optional<std::size_t> IndexOf(TextBlockId id) const override {
+    const auto found = indexes_.find(id);
+    return found == indexes_.end() ? std::nullopt : std::optional<std::size_t>(found->second);
+  }
+  TextSelectionBlock BlockAt(std::size_t index) const override {
+    const auto& position = positions_.at(index);
+    return position.block->paragraphs[position.paragraph];
+  }
+
+private:
+  struct Position { std::shared_ptr<const VirtualBlock> block; std::size_t paragraph; };
+  std::vector<Position> positions_;
+  std::unordered_map<TextBlockId, std::size_t> indexes_;
+};
+
+struct VirtualState {
+  std::shared_ptr<const VirtualSnapshot> snapshot;
+  std::uint64_t next_id = 0;
 };
 
 } // namespace
@@ -220,6 +319,41 @@ View Markdown(MarkdownDocument document, MarkdownOptions options) {
     auto content = Renderer(options, theme, UseEvents()).Blocks(document.Root(), theme.block_spacing);
     if (options.selectable) return View(SelectionArea(std::move(content)));
     return content;
+  });
+}
+
+View VirtualizedMarkdown(std::string_view source, MarkdownOptions options,
+                         MarkdownVirtualizationOptions virtualization) {
+  return VirtualizedMarkdown(ParseMarkdown(source), std::move(options), std::move(virtualization));
+}
+
+View VirtualizedMarkdown(MarkdownDocument document, MarkdownOptions options,
+                         MarkdownVirtualizationOptions virtualization) {
+  if (options.style) ValidateStyle(*options.style);
+  if (!std::isfinite(virtualization.estimated_block_extent) || virtualization.estimated_block_extent <= 0 ||
+      !std::isfinite(virtualization.cache_extent) || virtualization.cache_extent < 0)
+    throw std::invalid_argument("Invalid Markdown virtualization extents");
+  return Scope([document = std::move(document), options = std::move(options), virtualization] {
+    const auto theme = options.style ? *options.style : MarkdownStyle::FromTheme(UseTheme());
+    ValidateStyle(theme);
+    auto state = UseState(std::make_shared<VirtualState>()).Get();
+    if (!state->snapshot || state->snapshot->document != document)
+      state->snapshot = std::make_shared<const VirtualSnapshot>(document, state->snapshot, state->next_id);
+    const auto snapshot = state->snapshot;
+    const auto events = UseEvents();
+    auto list = VirtualList(snapshot->blocks.size(), [snapshot, options, theme, events](std::size_t index) -> View {
+      const auto& block = snapshot->blocks[index];
+      // Deferred item composition is essential: only realized rows build Text and
+      // invoke render callbacks, even if the SDK inspects all item keys.
+      return Scope([block, options, theme, events] {
+        return Renderer(options, theme, events, options.selectable ? &block->bindings : nullptr)
+            .RenderBlock(block->node);
+      }).With(Padding(EdgeInsets{0, 0, index + 1 < snapshot->blocks.size() ? theme.block_spacing : 0, 0}))
+        .Key(block->id);
+    }).EstimatedItemExtent(virtualization.estimated_block_extent).CacheExtent(virtualization.cache_extent);
+    if (virtualization.scroll_controller) list = std::move(list).Controller(*virtualization.scroll_controller);
+    if (options.selectable) return View(SelectionArea(std::move(list)).Source(snapshot));
+    return View(std::move(list));
   });
 }
 

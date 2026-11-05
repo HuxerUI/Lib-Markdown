@@ -23,5 +23,11 @@ Public API normalization; rebuild the library and applications together. See
 - Keep the preview updating during held-key input by retaining the pending deadline
   and rendering the latest source instead of restarting a trailing debounce.
 - Add differential parser edits and virtual-time live-preview interaction tests.
+- Add MarkdownParseSession::Append and MarkdownStream for arbitrary UTF-8 byte chunks,
+  transactional validation, pending scalar buffering and explicit Finish.
+- Add VirtualizedMarkdown using measured top-level blocks, reused prefix/suffix
+  identities, optional scrolling controller and logical offscreen text selection/copy.
+- Add demo streaming replay/stop and virtualization controls, with parser chunk-split,
+  lazy mounting, copy, scrolling and cancellation regressions.
 
 No release tag has been created. Syntax support and rendering defaults are unchanged.

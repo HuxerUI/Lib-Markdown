@@ -146,11 +146,44 @@ public:
   /// Applies one edit against the current source. Invalid byte ranges throw out_of_range;
   /// split scalars/invalid UTF-8 throw invalid_argument; size/depth limits throw length_error.
   [[nodiscard]] MarkdownDocument ApplyEdit(const MarkdownEdit& edit);
+  /// Appends complete UTF-8 text to the current source, using incremental parsing.
+  /// For arbitrary byte chunks (including split scalars), use MarkdownStream.
+  [[nodiscard]] MarkdownDocument Append(std::string_view text);
   /// Borrowed UTF-8 source, invalidated by successful replacement or session destruction.
   [[nodiscard]] std::string_view Source() const noexcept;
   /// Borrowed current snapshot; copy it to retain it across updates/destruction.
   [[nodiscard]] const MarkdownDocument& Document() const noexcept;
   [[nodiscard]] MarkdownParseStats LastParseStats() const noexcept;
+
+private:
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
+};
+
+/// Synchronous incremental Markdown input accepting arbitrary UTF-8 byte chunks.
+/// Buffers up to three trailing bytes of a split scalar; only complete valid UTF-8
+/// enters the parser. Markdown structures may change as more input arrives (including
+/// reference definitions affecting earlier links). No special partial-input grammar.
+/// Thread-confined, noncopyable/nonmovable. Updates are transactional on failure.
+class MarkdownStream final {
+public:
+  explicit MarkdownStream(ParseOptions options = {});
+  ~MarkdownStream();
+  MarkdownStream(const MarkdownStream&) = delete;
+  MarkdownStream& operator=(const MarkdownStream&) = delete;
+
+  /// Rejects invalid UTF-8 and input limits, including buffered bytes. Empty or purely
+  /// incomplete chunks preserve the document/stats. Appending after Finish throws logic_error.
+  [[nodiscard]] MarkdownDocument Append(std::string_view bytes);
+  /// Marks completion; throws invalid_argument for a truncated scalar without closing
+  /// the stream, so its remaining bytes can still arrive. Idempotent after success.
+  [[nodiscard]] MarkdownDocument Finish();
+  /// Borrowed committed UTF-8 source, excluding pending bytes. Invalidated on replacement.
+  [[nodiscard]] std::string_view Source() const noexcept;
+  [[nodiscard]] const MarkdownDocument& Document() const noexcept;
+  [[nodiscard]] MarkdownParseStats LastParseStats() const noexcept;
+  [[nodiscard]] std::size_t PendingByteCount() const noexcept;
+  [[nodiscard]] bool IsFinished() const noexcept;
 
 private:
   struct Impl;

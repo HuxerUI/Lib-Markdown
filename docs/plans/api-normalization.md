@@ -228,7 +228,8 @@ CI 覆盖 Windows/macOS/Linux parser，以及 Windows 组件和独立 demo。
 ## 8. 后续能力的边界
 
 后续进展（2026-11-05）：实时预览与独立解析会话已按追加需求实现，具体边界见
-[增量解析契约](../incremental-parsing.md)。以下清单保留规范化阶段的范围记录，虚拟化仍未实现。
+[增量解析契约](../incremental-parsing.md)。流式追加与顶层块虚拟化也已按追加需求实现，见
+[流式与虚拟化契约](../streaming-and-virtualization.md)。以下清单保留规范化阶段的范围记录。
 
 完成本轮后，分别设计并交付以下工作，不在规范化补丁中预留未实现的公开方法：
 

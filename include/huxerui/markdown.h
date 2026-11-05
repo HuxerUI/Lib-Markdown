@@ -7,6 +7,7 @@
 #include <huxerui/markdown/document.h>
 #include <huxerui/theme.h>
 #include <huxerui/view.h>
+#include <huxerui/scroll.h>
 
 namespace huxerui::markdown {
 
@@ -86,5 +87,27 @@ struct MarkdownEvents {
 /// For nondefault parsing call ParseMarkdown(source, options) first. A default-constructed
 /// document displays empty content. Attach MarkdownEvents on the returned View.
 [[nodiscard]] View Markdown(MarkdownDocument document, MarkdownOptions options = {});
+
+/// Measured, variable-height top-level block virtualization. Positive finite initial
+/// extent estimate; finite nonnegative cache distance, in DIPs. Nested lists/tables
+/// and individual large code blocks remain one item. Optional controller addresses
+/// top-level block indices. VirtualizedMarkdown owns vertical scrolling.
+struct MarkdownVirtualizationOptions {
+  float estimated_block_extent = 80.0F;
+  float cache_extent = 400.0F;
+  std::optional<ScrollController> scroll_controller;
+};
+
+/// Requires bounded height; do not wrap in another vertical ScrollView. Only visible
+/// and cached top-level blocks create Views. Unchanged prefix/suffix blocks retain
+/// identities across snapshots; arbitrary replacements can reset affected selection.
+/// With selectable=true, a logical text source supports copying offscreen text without
+/// mounting it. List markers are decorative. Custom-rendered code/images contribute
+/// source text to full selection, but their unbound custom Text is not an endpoint.
+/// MarkdownEvents bind as on Markdown; callbacks may repeat when items re-enter view.
+[[nodiscard]] View VirtualizedMarkdown(MarkdownDocument document, MarkdownOptions options = {},
+                                     MarkdownVirtualizationOptions virtualization = {});
+[[nodiscard]] View VirtualizedMarkdown(std::string_view source, MarkdownOptions options = {},
+                                     MarkdownVirtualizationOptions virtualization = {});
 
 } // namespace huxerui::markdown

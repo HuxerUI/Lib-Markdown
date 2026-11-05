@@ -145,7 +145,9 @@ remain application-owned.
 
 The follow-up adds live preview and the optional `MarkdownParseSession` API;
 existing one-shot parsing needs no additional migration. See the
-[incremental parsing contract](incremental-parsing.md). Virtualization, a separate
-streaming API and global Markdown theme inheritance are not included.
+[incremental parsing contract](incremental-parsing.md). Additional opt-in APIs now
+include `MarkdownStream`, `MarkdownParseSession::Append()` and `VirtualizedMarkdown`;
+see [streaming and virtualization](streaming-and-virtualization.md).
+Global Markdown theme inheritance is not included.
 Compiled target-API examples are available in
 [tests/api_examples.cpp](../tests/api_examples.cpp).

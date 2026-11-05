@@ -16,6 +16,7 @@ CommonMark parser, configurable GFM extensions, and ordinary declarative views.
 - Selection/copy through `SelectionArea`, ambient light/dark themes, custom code/image renderers
 - Immutable documents that can be parsed on a worker and reused across recompositions
 - Stateful incremental parsing with UTF-8 edits, safe prefix reuse and parse statistics
+- Arbitrary-byte UTF-8 streaming and optional measured top-level block virtualization
 - Vendored MIT-licensed MD4C; no runtime download, WebView, JavaScript, or HTML rendering
 
 The component uses HuxerUI's platform-neutral views and supports its Windows,
@@ -100,8 +101,46 @@ successful source, document and statistics. Sessions are synchronous and require
 serialized access; snapshots can be retained independently.
 
 This reduces parser work for suitable edits; source scans and retained AST copies
-remain linear. It does not provide incremental rendering or virtualization. See
+remain linear. Rendering virtualization is a separate opt-in view. See
 [the parsing contract](docs/incremental-parsing.md) for boundaries and diagnostics.
+
+## Streaming input
+
+```cpp
+MarkdownStream stream;
+auto document = stream.Append(chunk); // Arbitrary byte boundaries, including split UTF-8.
+// Publish document to UI state. Repeat Append for each chunk in order.
+document = stream.Finish();
+```
+
+The stream buffers an incomplete trailing scalar and incrementally parses complete
+UTF-8. `Source()` excludes pending bytes; `PendingByteCount()` reports them. Invalid
+chunks preserve the previous state. `Finish()` rejects truncated UTF-8, and successful
+completion closes the stream to further appends. Markdown is parsed normally at
+each step: later input may close a fence/emphasis or resolve earlier references.
+For already complete UTF-8 strings, `MarkdownParseSession::Append(text)` is sufficient.
+See [streaming and virtualization](docs/streaming-and-virtualization.md).
+
+## Virtualized documents
+
+```cpp
+return VirtualizedMarkdown(document, {}, {
+  .estimated_block_extent = 80.0F,
+  .cache_extent = 400.0F,
+}).With(Frame{.height = 600.0F});
+```
+
+This view owns vertical scrolling and requires bounded height; use it directly
+instead of `ScrollView(Markdown(...))`. It measures variable-height top-level blocks
+and only composes visible/cached items. It supports the same styling, renderers and
+link events, plus logical selection/copy of offscreen text. An optional
+`scroll_controller` addresses top-level block indices.
+
+Unchanged prefix/suffix blocks share render records and selection identities. Tail
+appends preserve the reading position; arbitrary insertions above the viewport can
+shift it. Large individual lists/tables/code blocks are not subdivided. AST/text
+storage and snapshot comparisons remain proportional to the document, and custom
+renderer Text is unbound for selection endpoints; see the detailed contract.
 
 ## Themes and custom rendering
 
@@ -156,7 +195,8 @@ The [standalone Markdown Playground](examples/preview/README.md) provides editab
 source beside a native preview, five switchable samples, light/dark themes, and
 custom code/image renderer examples. Live preview coalesces changes in cancellable
 120 ms windows, updating even during continuous typing; pause it to render manually.
-Parse statistics show prefix reuse.
+Parse statistics show prefix reuse. Toggle virtualization or replay a sample as
+48-byte chunks every 40 ms with the streaming controls.
 Narrow windows
 stack the panels; the source panel can also be hidden.
 
@@ -210,9 +250,9 @@ enabling compilers or building MD4C. The library has no generated resource packa
 Task checkboxes are presentation only. Code blocks use wrapped monospace text by
 default; provide a renderer for highlighting or different scrolling. Table columns
 have a configurable fixed width, with per-cell wrapping and GFM alignment.
-Footnotes, math, diagrams, HTML execution, a reusable editor component and document
-virtualization are outside this version. Stream chunks can be applied through the
-session, but there is no separate streaming grammar or finalization API.
+Footnotes, math, diagrams, HTML execution and a reusable editor component are outside
+this version. Virtualization operates at top-level blocks; streaming uses ordinary
+Markdown semantics without inventing a partial-input grammar.
 
 ## License
 
