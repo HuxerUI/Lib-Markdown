@@ -59,4 +59,16 @@ View VirtualArticle(MarkdownDocument document) {
   return VirtualizedMarkdown(document, {}, {.estimated_block_extent = 72.0F})
       .With(Frame{.height = 600.0F});
 }
+
+View ExtendedArticle(std::string_view source) {
+  auto document = ParseMarkdown(source, {
+    .highlight = true, .insertions = true, .underline = true,
+    .wiki_links = true, .admonitions = true, .footnotes = true,
+  });
+  return Markdown(document, {.admonition_renderer = [](const MarkdownNode& node) -> View {
+    return Text(PlainText(node));
+  }})
+      .On<MarkdownEvents::WikiLinkActivated>([](const MarkdownWikiLinkActivation& event) { (void)event.target; })
+      .On<MarkdownEvents::FootnoteActivated>([](const MarkdownFootnoteActivation& event) { (void)event.number; });
+}
 } // namespace markdown_examples

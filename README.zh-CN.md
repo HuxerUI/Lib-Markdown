@@ -7,6 +7,7 @@
 支持 CommonMark 标题、段落、嵌套列表、引用、分隔线、代码块，以及 GFM
 表格、删除线、任务列表和自动链接。文本由 HuxerUI `AttributedText` 渲染，
 支持选中复制、Unicode、明暗主题和链接回调。
+可选启用高亮、插入文本、下划线、Wiki 链接、提示块和脚注。
 
 ## 接入
 
@@ -81,6 +82,29 @@ return VirtualizedMarkdown(document, {}, {
 单个大型列表、表格或代码块内部不拆分，AST 和文本仍完整保存在内存中。
 详见 [流式与虚拟化契约](docs/streaming-and-virtualization.md)。
 
+## MD4C 可选扩展
+
+```cpp
+auto document = ParseMarkdown(source, {
+  .highlight = true, .insertions = true, .underline = true,
+  .wiki_links = true, .admonitions = true, .footnotes = true,
+});
+return Markdown(document)
+  .On<MarkdownEvents::WikiLinkActivated>([](const MarkdownWikiLinkActivation& event) {
+    // 由应用处理 event.target 页面标识，不自动作为 URI 打开。
+  })
+  .On<MarkdownEvents::FootnoteActivated>([](const MarkdownFootnoteActivation& event) {
+    // 由应用根据 event.number / event.label 定位脚注。
+  });
+```
+
+六项扩展默认关闭；`==高亮==`、`++新增++`、`_下划线_` 直接显示原生样式。
+启用下划线会改变下划线强调语义，斜体/粗体请用星号。
+`[[页面|标签]]` 产生独立 Wiki 事件，`> [!NOTE]` 等提示块使用主题容器，
+可通过 `admonition_renderer` 自定义。脚注按首次引用顺序编号，显示引用与文末定义，
+点击产生独立事件，不自动滚动。流式、增量和虚拟化均适用。
+完整支持范围和后续顺序见 [MD4C 能力矩阵](docs/md4c-extensions.md)。
+
 ## 配置
 
 - `ParseOptions`：传给 `ParseMarkdown`，分别控制表格、删除线、任务列表、自动链接和换行规则。
@@ -110,11 +134,12 @@ renderer 在 UI 组合时执行，节点引用仅在回调期间借用，延迟�
 
 ## 交互 Demo
 
-[Markdown Playground](examples/preview/README.md) 提供源码编辑与渲染对照、五组样例、
+[Markdown Playground](examples/preview/README.md) 提供源码编辑与渲染对照、六组样例、
 明暗主题、链接反馈和自定义代码/图片渲染。默认按 120 ms 窗口合并输入并刷新预览，
 持续输入也会更新，可关闭后点击
 「渲染」手动更新；底部显示重解析字节和复用块数。窄窗口自动上下排列。
 「虚拟化」切换按需挂载；「流式重放」每 40 ms 追加最多 48 字节，可随时停止，编辑或切换样例也会取消重放。
+「MD4C 扩展」样例开启六项可选语法，状态栏显示 Wiki 与脚注事件。
 
 ```sh
 cmake -S examples/preview -B build-preview -DHUXERUI_HOME=/path/to/HuxerUI

@@ -62,7 +62,7 @@ View Panel(std::string title, View content, const ThemeSpec& theme) {
 }
 
 struct PreviewSession {
-  MarkdownParseSession parser;
+  MarkdownParseSession parser{DemoParseOptions()};
   TaskHandle pending;
   std::uint64_t request = 0;
   bool scheduled = false;
@@ -142,7 +142,7 @@ void StartReplay(const std::shared_ptr<PreviewSession>& session, TaskScope tasks
   streaming = true;
   message = "流式重放中…";
   session->replay = tasks.Launch([=]() mutable -> Task<void> {
-    MarkdownStream stream;
+    MarkdownStream stream(DemoParseOptions());
     try {
       for (std::size_t offset = 0; offset < source.size();) {
         co_await Delay(std::chrono::milliseconds(40));
@@ -164,7 +164,7 @@ void StartReplay(const std::shared_ptr<PreviewSession>& session, TaskScope tasks
 }
 
 View App() {
-  static const auto initial_document = ParseMarkdown(Samples()[0].source);
+  static const auto initial_document = ParseMarkdown(Samples()[0].source, DemoParseOptions());
   auto selected = UseState(std::size_t{0});
   auto dark = UseState(false);
   auto show_source = UseState(true);
@@ -212,6 +212,13 @@ View App() {
     rendered = std::move(rendered)
         .On<MarkdownEvents::LinkActivated>([message](const MarkdownLinkActivation& event) mutable {
           message = "链接：" + event.destination;
+        })
+        .On<MarkdownEvents::WikiLinkActivated>([message](const MarkdownWikiLinkActivation& event) mutable {
+          message = "Wiki：" + event.target;
+        })
+        .On<MarkdownEvents::FootnoteActivated>([message](const MarkdownFootnoteActivation& event) mutable {
+          message = "脚注：" + event.label + " · " + std::to_string(event.number) +
+              " · 引用 " + std::to_string(event.reference);
         });
     if (!virtualized.Get()) rendered = ScrollView(std::move(rendered));
     View preview = Panel("渲染预览", std::move(rendered)

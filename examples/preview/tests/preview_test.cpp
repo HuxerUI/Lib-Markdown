@@ -24,7 +24,7 @@ private:
 int main(int argc, char** argv) { return Run([&] {
   CHECK(argc == 2);
   for (const auto& sample : markdown_preview::Samples())
-    CHECK(!markdown::ParseMarkdown(sample.source).Root().children.empty());
+    CHECK(!markdown::ParseMarkdown(sample.source, markdown_preview::DemoParseOptions()).Root().children.empty());
 
   UiTest ui(application, {.viewport = {1180, 820}, .resource_provider = std::make_shared<PreviewResources>(argv[1])});
   const auto advance = [&](std::chrono::milliseconds duration) {
@@ -163,6 +163,22 @@ int main(int argc, char** argv) { return Run([&] {
   advance(std::chrono::milliseconds(200));
   CHECK(preview().Find(UiSelector::Text("列表与表格")).Exists());
   CHECK(ui.Find(UiSelector::Key("source-editor")).One().value == markdown_preview::Samples()[1].source);
+  ui.Find(UiSelector::Key("sample-5")).Tap();
+  CHECK(preview().Find(UiSelector::Text("MD4C 原生扩展")).Exists());
+  ui.FindSemantics(UiSemanticSelector::AllOf(UiSemanticSelector::Role(SemanticRole::Link),
+      UiSemanticSelector::Label("项目文档"))).PerformSemanticAction({SemanticActionKind::Activate, {}});
+  CHECK(ui.Find(UiSelector::Key("status")).One().text == "Wiki：文档/开始");
+  ui.Find(UiSelector::Key("virtual-toggle")).Tap();
+  CHECK(preview().Find(UiSelector::Text("Warning")).Exists());
+  ui.FindSemantics(UiSemanticSelector::AllOf(UiSemanticSelector::Role(SemanticRole::Link),
+      UiSemanticSelector::Label("[2]"))).PerformSemanticAction({SemanticActionKind::Activate, {}});
+  CHECK(ui.Find(UiSelector::Key("status")).One().text == "脚注：第二 · 2 · 引用 1");
+  ui.Find(UiSelector::Key("stream-toggle")).Tap();
+  for (std::size_t i = 0; i < (markdown_preview::Samples()[5].source.size() + 47) / 48; ++i)
+    advance(std::chrono::milliseconds(41));
+  CHECK(ui.Find(UiSelector::Key("source-editor")).One().value == markdown_preview::Samples()[5].source);
+  CHECK(ui.Find(UiSelector::Key("status")).One().text == "流式重放完成");
+  CHECK(preview().Find(UiSelector::Text("Warning")).Exists());
   ui.SetWindowMetrics({.viewport = {480, 820}});
   ui.Pump();
   const auto source_bounds = ui.Find(UiSelector::Key("source-editor")).One().bounds;

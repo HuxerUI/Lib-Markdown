@@ -30,4 +30,14 @@ Public API normalization; rebuild the library and applications together. See
 - Add demo streaming replay/stop and virtualization controls, with parser chunk-split,
   lazy mounting, copy, scrolling and cancellation regressions.
 
-No release tag has been created. Syntax support and rendering defaults are unchanged.
+- Expose MD4C highlight, insertion, underline, Wiki link, admonition and footnote
+  extensions as opt-in ParseOptions, with owned AST metadata and native rendering.
+- Add WikiLinkActivated / FootnoteActivated events, themed highlight/admonition
+  styles and a custom admonition renderer. Wiki targets are opaque, not URI links.
+- Normalize footnote inline bodies into paragraphs and keep definition/numbering
+  updates on the conservative full-parse path; cover streaming and virtual selection.
+- Add the MD4C Extensions demo sample and a capability/next-step matrix. Extend
+  NodeKind without preserving numeric ABI; rebuild and update exhaustive visitors.
+
+No release tag has been created. Default syntax remains unchanged; new extensions
+are explicitly enabled. Demo parsing enables the optional extensions.

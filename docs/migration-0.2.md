@@ -3,10 +3,10 @@
 0.2 normalizes the public API. This is a **source- and binary-incompatible** update:
 rebuild the library and its consumers together. There are no legacy option fields
 or compatibility overloads. Namespace, headers and the `HuxerUI::Markdown` CMake
-target are unchanged. Syntax support and rendering defaults are unchanged.
+target are unchanged. Default syntax is unchanged; additional syntax is opt-in.
 
 0.2 调整了公开 API，需要同步修改调用代码并重新编译库与应用；不保留两套配置字段。
-命名空间、头文件与 CMake 目标保持不变，语法支持和默认显示行为保持不变。
+命名空间、头文件与 CMake 目标保持不变，默认语法保持不变；新增语法通过选项显式启用。
 
 ## Names / 名称对照
 
@@ -149,5 +149,9 @@ existing one-shot parsing needs no additional migration. See the
 include `MarkdownStream`, `MarkdownParseSession::Append()` and `VirtualizedMarkdown`;
 see [streaming and virtualization](streaming-and-virtualization.md).
 Global Markdown theme inheritance is not included.
+Six optional MD4C extensions add AST kinds/fields, styles, an admonition renderer
+and typed Wiki/footnote events; see [the extension contract](md4c-extensions.md).
+NodeKind numeric values are not a serialization ABI. Rebuild all consumers and
+update exhaustive node visitors; no compatibility aliases are provided.
 Compiled target-API examples are available in
 [tests/api_examples.cpp](../tests/api_examples.cpp).

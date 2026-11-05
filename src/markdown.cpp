@@ -36,6 +36,14 @@ struct InlineBuilder {
     case NodeKind::Strikethrough:
       style.decoration = style.decoration.value_or(TextDecoration::None) | TextDecoration::StrikeThrough;
       break;
+    case NodeKind::Underline:
+    case NodeKind::Insertion:
+      style.decoration = style.decoration.value_or(TextDecoration::None) | TextDecoration::Underline;
+      break;
+    case NodeKind::Highlight:
+      style.foreground = theme.highlight_foreground;
+      style.background = theme.highlight_background;
+      break;
     case NodeKind::Code:
       style.font = theme.code.font;
       style.foreground = theme.code.foreground;
@@ -45,21 +53,26 @@ struct InlineBuilder {
       style.foreground = theme.muted;
       Append(PlainText(node), style);
       return;
+    case NodeKind::WikiLink:
+    case NodeKind::FootnoteReference:
     case NodeKind::Link: {
-      const bool allowed = policy ? policy(node.destination) : IsDefaultLinkAllowed(node.destination);
+      const bool allowed = node.kind != NodeKind::Link ||
+          (policy ? policy(node.destination) : IsDefaultLinkAllowed(node.destination));
       const auto begin = length;
       if (allowed) {
         style.foreground = theme.link;
         style.decoration = style.decoration.value_or(TextDecoration::None) | TextDecoration::Underline;
       }
+      Append(node.text, style);
       for (const auto& child : node.children) Visit(child, style);
       if (allowed && length > begin) {
-        auto uri = Uri::Parse(node.destination);
+        auto uri = node.kind == NodeKind::Link ? Uri::Parse(node.destination) : std::optional<Uri>{};
         // Native Uri requires an absolute ASCII URI. Keep relative/Unicode originals
         // separately and use an inert identity for the native text interaction.
         if (!uri) uri = Uri("huxerui-markdown:link-" + std::to_string(originals.size()));
         links.push_back({{begin, length}, std::move(*uri)});
-        originals.push_back({{begin, length}, node.destination});
+        originals.push_back({{begin, length}, node.destination, node.kind,
+                             node.footnote_number, node.footnote_label, node.footnote_reference});
       }
       return;
     }
@@ -105,8 +118,14 @@ private:
         .On<TextEvents::LinkActivated>([events = events_, links = std::move(inline_text.links)](const TextLinkActivation& event) {
           for (const auto& link : links) {
             if (link.range == event.range) {
-              const MarkdownLinkActivation activation{link.destination};
-              events.Emit<MarkdownEvents::LinkActivated>(activation);
+              if (link.kind == NodeKind::WikiLink) {
+                events.Emit<MarkdownEvents::WikiLinkActivated>(MarkdownWikiLinkActivation{link.destination});
+              } else if (link.kind == NodeKind::FootnoteReference) {
+                events.Emit<MarkdownEvents::FootnoteActivated>(MarkdownFootnoteActivation{
+                    link.footnote_number, link.footnote_label, link.footnote_reference});
+              } else {
+                events.Emit<MarkdownEvents::LinkActivated>(MarkdownLinkActivation{link.destination});
+              }
               return;
             }
           }
@@ -173,6 +192,32 @@ private:
       return Blocks(node, theme_.block_spacing)
           .With(Padding(EdgeInsets{8.0F, 8.0F, 8.0F, theme_.indent}),
                 Background{theme_.quote_background}, Border{theme_.border, 1.0F});
+    case NodeKind::Admonition: {
+      if (options_.admonition_renderer) return options_.admonition_renderer(node);
+      const char* label = "Note";
+      switch (node.admonition_kind) {
+      case AdmonitionKind::Tip: label = "Tip"; break;
+      case AdmonitionKind::Important: label = "Important"; break;
+      case AdmonitionKind::Warning: label = "Warning"; break;
+      case AdmonitionKind::Caution: label = "Caution"; break;
+      default: break;
+      }
+      return Column{
+        Text(label).Style({theme_.body.font.WithWeight(FontWeight::Bold), theme_.admonition_foreground}),
+        Blocks(node, theme_.block_spacing),
+      }.With(Padding(theme_.code_padding), Spacing(theme_.list_spacing), CrossAlign(CrossAxisAlignment::Stretch),
+             Background{theme_.admonition_background}, Border{theme_.admonition_foreground, 1.0F}, CornerRadius(theme_.corner_radius));
+    }
+    case NodeKind::FootnoteSection:
+      return Column{
+        Column(std::vector<View>{}).With(Frame{.height = 1.0F}, Background{theme_.border}),
+        Blocks(node, theme_.block_spacing),
+      }.With(Spacing(theme_.block_spacing), CrossAlign(CrossAxisAlignment::Stretch));
+    case NodeKind::FootnoteDefinition:
+      return Row{
+        Text("[" + std::to_string(node.footnote_number) + "]").Style({theme_.body.font, theme_.muted}),
+        Blocks(node, theme_.block_spacing).With(Grow{}),
+      }.With(Spacing(8.0F), CrossAlign(CrossAxisAlignment::Start));
     case NodeKind::UnorderedList:
     case NodeKind::OrderedList: return List(node);
     case NodeKind::ThematicBreak:
@@ -301,6 +346,10 @@ MarkdownStyle MarkdownStyle::FromTheme(const ThemeSpec& theme) {
   result.quote_background = theme.colors.surface_container;
   result.table_header_background = theme.colors.surface_container_highest;
   result.border = theme.colors.outline;
+  result.highlight_foreground = theme.colors.on_primary_container;
+  result.highlight_background = theme.colors.primary_container;
+  result.admonition_foreground = theme.colors.primary;
+  result.admonition_background = theme.colors.surface_container;
   const float scale = theme.typography.body_large / 16.0F;
   for (auto& size : result.heading_sizes) size *= scale;
   return result;

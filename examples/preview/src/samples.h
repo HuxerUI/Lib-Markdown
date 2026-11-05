@@ -2,6 +2,7 @@
 
 #include <array>
 #include <string>
+#include <huxerui/markdown/document.h>
 
 namespace markdown_preview {
 
@@ -10,8 +11,13 @@ struct Sample {
   std::string source;
 };
 
-inline const std::array<Sample, 5>& Samples() {
-  static const std::array<Sample, 5> samples{{
+inline huxerui::markdown::ParseOptions DemoParseOptions() {
+  return {.highlight = true, .insertions = true, .underline = true,
+          .wiki_links = true, .admonitions = true, .footnotes = true};
+}
+
+inline const std::array<Sample, 6>& Samples() {
+  static const std::array<Sample, 6> samples{{
     {"基础排版", R"md(# 你好，Markdown
 
 用原生 HuxerUI 组件阅读和展示 Markdown。
@@ -123,6 +129,32 @@ View Article() {
       }
       return text;
     }()},
+    {"MD4C 扩展", R"md(# MD4C 原生扩展
+
+==高亮文字==、++新增文字++、_下划线_，以及 **==嵌套格式==**。
+
+Wiki 链接：[[文档/开始|项目文档]]，目标交给应用处理。
+
+> [!NOTE]
+> 提示内容支持 **粗体** 和 ==高亮==。
+
+> [!TIP]
+> 切换虚拟化，比较长文档的按需挂载。
+
+> [!IMPORTANT]
+> 扩展通过 ParseOptions 显式开启。
+
+> [!WARNING]
+> 启用下划线后，请使用星号输入斜体。
+
+> [!CAUTION]
+> Wiki 链接不会自动转换为网址或打开浏览器。
+
+脚注示例[^说明]，同一脚注再次引用[^说明]，另一个脚注[^第二]。
+
+[^说明]: 脚注保留中文标签，按首次引用顺序编号。
+[^第二]: 后追加的定义可能影响前文，自动回退全量解析。
+)md"},
   }};
   return samples;
 }

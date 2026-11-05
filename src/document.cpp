@@ -96,6 +96,8 @@ std::string Attribute(const MD_ATTRIBUTE& attribute) {
   return result;
 }
 
+bool IsBlock(NodeKind kind);
+
 struct Builder {
   struct Restart {
     std::size_t byte;
@@ -184,10 +186,26 @@ int EnterBlock(MD_BLOCKTYPE type, void* detail, void* context) noexcept {
     case MD_BLOCK_TR: kind = NodeKind::TableRow; break;
     case MD_BLOCK_TH: kind = NodeKind::TableHeaderCell; break;
     case MD_BLOCK_TD: kind = NodeKind::TableCell; break;
+    case MD_BLOCK_ADMONITION: kind = NodeKind::Admonition; break;
+    case MD_BLOCK_FOOTNOTE_DEF_SECTION: kind = NodeKind::FootnoteSection; break;
+    case MD_BLOCK_FOOTNOTE_DEF: kind = NodeKind::FootnoteDefinition; break;
     default: throw std::runtime_error("Unexpected Markdown block");
     }
     auto& node = b.Push(kind);
     if (b.stack.size() == 2) b.first_content = true;
+    if (type == MD_BLOCK_ADMONITION) {
+      const auto name = Attribute(static_cast<MD_BLOCK_ADMONITION_DETAIL*>(detail)->type);
+      if (name == "tip") node.admonition_kind = AdmonitionKind::Tip;
+      else if (name == "important") node.admonition_kind = AdmonitionKind::Important;
+      else if (name == "warning") node.admonition_kind = AdmonitionKind::Warning;
+      else if (name == "caution") node.admonition_kind = AdmonitionKind::Caution;
+    }
+    if (type == MD_BLOCK_FOOTNOTE_DEF) {
+      const auto& d = *static_cast<MD_BLOCK_FOOTNOTE_DEF_DETAIL*>(detail);
+      node.footnote_number = d.id;
+      node.footnote_label = Attribute(d.label);
+      node.footnote_reference_count = d.ref_count;
+    }
     if (type == MD_BLOCK_H) node.heading_level = static_cast<MD_BLOCK_H_DETAIL*>(detail)->level;
     if (type == MD_BLOCK_UL) node.tight = static_cast<MD_BLOCK_UL_DETAIL*>(detail)->is_tight != 0;
     if (type == MD_BLOCK_OL) {
@@ -219,11 +237,11 @@ int LeaveBlock(MD_BLOCKTYPE type, void*, void* context) noexcept {
   auto& b = *static_cast<Builder*>(context);
   return b.Guard([&] {
     if (type == MD_BLOCK_DOC) return;
-    if (type == MD_BLOCK_LI) {
+    if (type == MD_BLOCK_LI || type == MD_BLOCK_FOOTNOTE_DEF) {
       auto& children = b.stack.back()->children;
       std::vector<MarkdownNode> normalized;
       for (auto& child : children) {
-        if (child.kind >= NodeKind::Emphasis) {
+        if (!IsBlock(child.kind)) {
           if (normalized.empty() || normalized.back().kind != NodeKind::Paragraph)
             normalized.push_back(MarkdownNode{.kind = NodeKind::Paragraph});
           normalized.back().children.push_back(std::move(child));
@@ -249,9 +267,23 @@ int EnterSpan(MD_SPANTYPE type, void* detail, void* context) noexcept {
     case MD_SPAN_CODE: kind = NodeKind::Code; break;
     case MD_SPAN_A: kind = NodeKind::Link; break;
     case MD_SPAN_IMG: kind = NodeKind::Image; break;
+    case MD_SPAN_U: kind = NodeKind::Underline; break;
+    case MD_SPAN_MARK: kind = NodeKind::Highlight; break;
+    case MD_SPAN_INS: kind = NodeKind::Insertion; break;
+    case MD_SPAN_WIKILINK: kind = NodeKind::WikiLink; break;
+    case MD_SPAN_FOOTNOTE_REF: kind = NodeKind::FootnoteReference; break;
     default: throw std::runtime_error("Unexpected Markdown span");
     }
     auto& node = b.Push(kind);
+    if (type == MD_SPAN_WIKILINK)
+      node.destination = Attribute(static_cast<MD_SPAN_WIKILINK_DETAIL*>(detail)->target);
+    if (type == MD_SPAN_FOOTNOTE_REF) {
+      const auto& d = *static_cast<MD_SPAN_FOOTNOTE_REF_DETAIL*>(detail);
+      node.footnote_number = d.id;
+      node.footnote_label = Attribute(d.label);
+      node.footnote_reference = d.ref_id;
+      node.text = "[" + std::to_string(d.id) + "]";
+    }
     if (type == MD_SPAN_A) {
       const auto& d = *static_cast<MD_SPAN_A_DETAIL*>(detail);
       node.destination = Attribute(d.href);
@@ -291,7 +323,16 @@ int TextCallback(MD_TEXTTYPE type, const MD_CHAR* data, MD_SIZE size, void* cont
 }
 
 bool IsBlock(NodeKind kind) {
-  return kind <= NodeKind::TableCell;
+  switch (kind) {
+  case NodeKind::Document: case NodeKind::Paragraph: case NodeKind::Heading:
+  case NodeKind::BlockQuote: case NodeKind::UnorderedList: case NodeKind::OrderedList:
+  case NodeKind::ListItem: case NodeKind::ThematicBreak: case NodeKind::CodeBlock:
+  case NodeKind::Table: case NodeKind::TableHead: case NodeKind::TableBody:
+  case NodeKind::TableRow: case NodeKind::TableHeaderCell: case NodeKind::TableCell:
+  case NodeKind::Admonition: case NodeKind::FootnoteSection: case NodeKind::FootnoteDefinition:
+    return true;
+  default: return false;
+  }
 }
 
 void CollectText(const MarkdownNode& node, std::string& out) {
@@ -327,6 +368,12 @@ ParsedSource ParseValidatedSource(std::string_view source, const ParseOptions& o
   if (options.strikethrough) parser.flags |= MD_FLAG_STRIKETHROUGH;
   if (options.task_lists) parser.flags |= MD_FLAG_TASKLISTS;
   if (options.autolinks) parser.flags |= MD_FLAG_PERMISSIVEAUTOLINKS;
+  if (options.highlight) parser.flags |= MD_FLAG_HIGHLIGHT;
+  if (options.insertions) parser.flags |= MD_FLAG_INSERT;
+  if (options.underline) parser.flags |= MD_FLAG_UNDERLINE;
+  if (options.wiki_links) parser.flags |= MD_FLAG_WIKILINKS;
+  if (options.admonitions) parser.flags |= MD_FLAG_ADMONITIONS;
+  if (options.footnotes) parser.flags |= MD_FLAG_FOOTNOTES;
   parser.enter_block = EnterBlock;
   parser.leave_block = LeaveBlock;
   parser.enter_span = EnterSpan;

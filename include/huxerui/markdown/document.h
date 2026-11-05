@@ -13,8 +13,12 @@ namespace huxerui::markdown {
 enum class NodeKind {
   Document, Paragraph, Heading, BlockQuote, UnorderedList, OrderedList, ListItem,
   ThematicBreak, CodeBlock, Table, TableHead, TableBody, TableRow, TableHeaderCell,
-  TableCell, Emphasis, Strong, Strikethrough, Code, Link, Image, Text,
+  TableCell, Admonition, FootnoteSection, FootnoteDefinition,
+  Emphasis, Strong, Strikethrough, Underline, Highlight, Insertion, Code, Link,
+  WikiLink, FootnoteReference, Image, Text,
 };
+
+enum class AdmonitionKind { Note, Tip, Important, Warning, Caution };
 
 /// Source alignment for a table cell. Default uses leading paragraph alignment.
 enum class CellAlignment { Default, Left, Center, Right };
@@ -33,7 +37,7 @@ struct MarkdownNode {
   bool tight = false;
   /// Only task ListItem nodes have a value; false means unchecked.
   std::optional<bool> task_checked;
-  /// Entity-decoded link/image destination; not resolved against a base or fetched.
+  /// Entity-decoded link/image destination or opaque WikiLink target. Never fetched/resolved.
   std::string destination;
   std::string title;
   /// Complete decoded code-fence info string; empty for indented code or other nodes.
@@ -41,6 +45,16 @@ struct MarkdownNode {
   /// First word of fence_info; empty when no language was supplied.
   std::string language;
   CellAlignment alignment = CellAlignment::Default;
+  /// Only meaningful on Admonition.
+  AdmonitionKind admonition_kind = AdmonitionKind::Note;
+  /// FootnoteReference/FootnoteDefinition: assigned by first-reference order, starting at 1.
+  unsigned footnote_number = 0;
+  /// Entity-decoded label; not a source coordinate or globally stable identity.
+  std::string footnote_label;
+  /// FootnoteReference: ordinal among references to this definition, starting at 1.
+  unsigned footnote_reference = 0;
+  /// FootnoteDefinition: total references in this parse.
+  unsigned footnote_reference_count = 0;
 
   bool operator==(const MarkdownNode&) const = default;
 };
@@ -59,12 +73,21 @@ struct ParseOptions {
   bool strikethrough = true;
   bool task_lists = true;
   bool autolinks = true;
+  /// Optional MD4C extensions, disabled by default. No third-party flags leak into this API.
+  bool highlight = false; ///< ==highlight==
+  bool insertions = false; ///< ++inserted++ (displayed with underline)
+  /// Changes _ and __ to underline; use * and ** for emphasis when enabled.
+  bool underline = false;
+  bool wiki_links = false; ///< [[target]] or [[target|label]]; opaque application-owned target.
+  bool admonitions = false; ///< > [!NOTE], TIP, IMPORTANT, WARNING, CAUTION.
+  bool footnotes = false; ///< [^label] and [^label]: definition; can affect earlier content.
   /// Does not change explicit hard breaks or newlines inside code blocks/spans.
   SoftBreakMode soft_break_mode = SoftBreakMode::Space;
   /// Positive UTF-8 input-byte limit, default 8 MiB; exceeding it throws length_error.
   std::size_t max_input_bytes = 8 * 1024 * 1024;
   /// Positive nesting limit, default 128, maximum 512; exceeded depth throws length_error.
   std::size_t max_nesting = 128;
+  bool operator==(const ParseOptions&) const = default;
 };
 
 /// Immutable, cheaply copied document snapshot. Copies share storage; equality compares
@@ -97,7 +120,7 @@ private:
   friend class MarkdownParseSession;
 };
 
-/// Parse CommonMark plus configurable GFM tables, tasks, autolinks and strikethrough.
+/// Parse CommonMark plus the explicitly enabled extensions in ParseOptions.
 /// HTML is literal text. Invalid UTF-8/options throw invalid_argument; resource limits
 /// throw length_error. Parsing errors throw runtime_error; allocation errors propagate.
 /// May run on a worker. Owns all resulting text; the source need only survive this call.

@@ -25,6 +25,10 @@ struct MarkdownStyle {
   Color quote_background = Color::Rgb(246, 248, 250);
   Color table_header_background = Color::Rgb(246, 248, 250);
   Color border = Color::Rgb(208, 215, 222);
+  Color highlight_foreground = Color::Rgb(60, 45, 0);
+  Color highlight_background = Color::Rgb(255, 235, 150);
+  Color admonition_foreground = Color::Rgb(9, 105, 218);
+  Color admonition_background = Color::Rgb(246, 248, 250);
   std::array<float, 6> heading_sizes{32, 26, 22, 20, 18, 16};
   float block_spacing = 12.0F;
   float list_spacing = 4.0F;
@@ -48,6 +52,8 @@ using MarkdownCodeBlockRenderer = std::function<View(const MarkdownNode&)>;
 /// borrowing/thread rules apply as for MarkdownCodeBlockRenderer; inline images
 /// use alt text. The application owns URI policy, loading, sizing and placeholders.
 using MarkdownStandaloneImageRenderer = std::function<View(const MarkdownNode&)>;
+/// Optional replacement for an entire Admonition block, with the same borrowing rules.
+using MarkdownAdmonitionRenderer = std::function<View(const MarkdownNode&)>;
 
 /// Display configuration only. Set ParseOptions with ParseMarkdown before rendering.
 struct MarkdownOptions {
@@ -62,12 +68,26 @@ struct MarkdownOptions {
   MarkdownStandaloneImageRenderer standalone_image_renderer;
   /// Optional replacement for a fenced/indented code block (e.g. syntax highlighting).
   MarkdownCodeBlockRenderer code_block_renderer;
+  MarkdownAdmonitionRenderer admonition_renderer;
 };
 
 /// Owned link information. Destination preserves decoded relative paths, anchors and Unicode.
 struct MarkdownLinkActivation {
   /// Decoded original address, without URI normalization or automatic navigation.
   std::string destination;
+};
+
+/// Wiki targets are opaque page identifiers; no URI parsing, link_policy or automatic navigation.
+struct MarkdownWikiLinkActivation {
+  std::string target;
+};
+
+/// Requests application-owned navigation to a footnote. Does not emit LinkActivated.
+/// Numbers and reference ordinals are 1-based and may change after editing definitions/references.
+struct MarkdownFootnoteActivation {
+  unsigned number = 0;
+  std::string label;
+  unsigned reference = 0;
 };
 
 /// Events bound on Markdown(...).On<Key>(handler). Run in the owning UI scope;
@@ -77,6 +97,8 @@ struct MarkdownEvents {
   /// The payload reference is borrowed for the callback; copy it to retain it.
   /// Policy-rejected links do not emit. Missing handlers do nothing; handler exceptions propagate.
   struct LinkActivated : Event<void(const MarkdownLinkActivation&)> {};
+  struct WikiLinkActivated : Event<void(const MarkdownWikiLinkActivation&)> {};
+  struct FootnoteActivated : Event<void(const MarkdownFootnoteActivation&)> {};
 };
 
 /// Native declarative Markdown content. Wrap in ScrollView to scroll vertically.
@@ -104,6 +126,7 @@ struct MarkdownVirtualizationOptions {
 /// With selectable=true, a logical text source supports copying offscreen text without
 /// mounting it. List markers are decorative. Custom-rendered code/images contribute
 /// source text to full selection, but their unbound custom Text is not an endpoint.
+/// The same rule applies to custom admonitions; generated titles/definition numbers are decorative.
 /// MarkdownEvents bind as on Markdown; callbacks may repeat when items re-enter view.
 [[nodiscard]] View VirtualizedMarkdown(MarkdownDocument document, MarkdownOptions options = {},
                                      MarkdownVirtualizationOptions virtualization = {});

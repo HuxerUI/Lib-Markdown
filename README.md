@@ -12,6 +12,7 @@ CommonMark parser, configurable GFM extensions, and ordinary declarative views.
 - Headings, paragraphs, nested lists, quotes, rules, fenced and indented code
 - Bold, italic, nested emphasis, inline code, strikethrough, and reference links
 - GFM tables with alignment and horizontal scrolling, read-only task lists, autolinks
+- Opt-in highlight, insertion, underline, Wiki links, GitHub-style admonitions and footnotes
 - Native attributed text with Unicode-safe ranges and application-owned link activation
 - Selection/copy through `SelectionArea`, ambient light/dark themes, custom code/image renderers
 - Immutable documents that can be parsed on a worker and reused across recompositions
@@ -104,6 +105,32 @@ This reduces parser work for suitable edits; source scans and retained AST copie
 remain linear. Rendering virtualization is a separate opt-in view. See
 [the parsing contract](docs/incremental-parsing.md) for boundaries and diagnostics.
 
+## Optional MD4C extensions
+
+```cpp
+auto document = ParseMarkdown(source, {
+  .highlight = true, .insertions = true, .underline = true,
+  .wiki_links = true, .admonitions = true, .footnotes = true,
+});
+return Markdown(document)
+  .On<MarkdownEvents::WikiLinkActivated>([](const MarkdownWikiLinkActivation& event) {
+    // Resolve event.target as an application-owned page identifier.
+  })
+  .On<MarkdownEvents::FootnoteActivated>([](const MarkdownFootnoteActivation& event) {
+    // Locate event.number / event.label using your application's navigation.
+  });
+```
+
+These six extensions default to off. `==highlight==`, `++insertion++` and `_underline_`
+produce native character styles; enabling underline changes underscore emphasis,
+so use `*` / `**` for italic/bold. Wiki links (`[[target|label]]`) emit a dedicated
+event and do not use URI policy. Admonitions (`> [!NOTE]`, TIP, IMPORTANT, WARNING,
+CAUTION) display themed containers; `admonition_renderer` can replace them.
+Footnotes display `[number]` references and a definition section, ordered by first
+reference. Neither new event automatically navigates or also emits LinkActivated.
+Snapshots, streaming and virtualization support all six. See the
+[capability matrix and contracts](docs/md4c-extensions.md).
+
 ## Streaming input
 
 ```cpp
@@ -192,11 +219,13 @@ to 8 MiB and nesting to 128; the nesting limit can be configured up to 512.
 ## Interactive demo
 
 The [standalone Markdown Playground](examples/preview/README.md) provides editable
-source beside a native preview, five switchable samples, light/dark themes, and
+source beside a native preview, six switchable samples, light/dark themes, and
 custom code/image renderer examples. Live preview coalesces changes in cancellable
 120 ms windows, updating even during continuous typing; pause it to render manually.
 Parse statistics show prefix reuse. Toggle virtualization or replay a sample as
 48-byte chunks every 40 ms with the streaming controls.
+The MD4C Extensions sample enables all six optional extensions; its Wiki/footnote
+events appear in the status bar.
 Narrow windows
 stack the panels; the source panel can also be hidden.
 
@@ -250,7 +279,7 @@ enabling compilers or building MD4C. The library has no generated resource packa
 Task checkboxes are presentation only. Code blocks use wrapped monospace text by
 default; provide a renderer for highlighting or different scrolling. Table columns
 have a configurable fixed width, with per-cell wrapping and GFM alignment.
-Footnotes, math, diagrams, HTML execution and a reusable editor component are outside
+Math, diagrams, HTML execution and a reusable editor component are outside
 this version. Virtualization operates at top-level blocks; streaming uses ordinary
 Markdown semantics without inventing a partial-input grammar.
 

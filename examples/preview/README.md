@@ -5,7 +5,7 @@
 
 ## 功能
 
-- 五组样例：基础排版、列表与表格、链接与边界、自定义渲染、长文档。
+- 六组样例：基础排版、列表与表格、链接与边界、自定义渲染、长文档、MD4C 扩展。
 - 左侧编辑 Markdown，默认按 120 ms 窗口合并输入并更新右侧预览，长按连续输入也会刷新；可关闭「实时预览」后手动渲染。
 - 会话增量解析，底部显示全量/增量模式、重解析字节数和复用的顶层块数。
 - 「流式重放」以每 40 ms 最多 48 字节的分片重放当前样例，能处理 UTF-8 字符被拆开；再次点击停止。
@@ -14,6 +14,7 @@
 - 明暗主题切换、隐藏/显示源码；窄窗口自动变成上下布局。
 - 原生文本选择和复制；相对地址、中文地址和锚点通过底部状态栏反馈。
 - 自定义代码卡片展示语言和行号；自定义图片回调绘制本地 Canvas。
+- MD4C 扩展：原生高亮/插入/下划线、Wiki 链接、五种提示块和脚注。
 
 编辑器演示完整受控输入，`MarkdownParseSession` 接收完整源码并复用未受影响的前部块。
 窗口到期后在 UI 线程同步解析；大文档应用可自行串行调度到工作线程。引用定义等情况回退全量
@@ -21,6 +22,10 @@
 大型列表、表格或代码块。链接只显示回调，不会打开浏览器。
 图片示例仅识别 `demo:landscape`，
 不请求网络。组件默认渲染行为可以通过「自定义渲染」开关对比。
+
+demo 的解析会话与流式会话使用相同的 `DemoParseOptions()`，显式开启六项新增语法。
+库的默认解析仍关闭它们。Wiki 目标与脚注点击通过各自的类型化事件显示在状态栏，
+不打开网址、不自动滚动。脚注定义存在时解析器保守回退全量解析，底部统计会如实显示。
 
 demo 使用 0.2 API：State 保存 `MarkdownDocument` 值，通过
 `.On<MarkdownEvents::LinkActivated>()` 处理链接，使用 `code_block_renderer` 和
@@ -81,13 +86,13 @@ CI 会独立构建并测试 demo，在成功的 `native (preview)` 作业中上�
 ## 代码位置
 
 - [src/app.cpp](src/app.cpp)：编辑与预览界面、主题、链接回调和自定义渲染。
-- [src/samples.h](src/samples.h)：五组 Markdown 样例。
+- [src/samples.h](src/samples.h)：六组 Markdown 样例及 demo 的显式解析选项。
 - [platform/desktop/main.cpp](platform/desktop/main.cpp)：桌面启动入口。
 - [tests/preview_test.cpp](tests/preview_test.cpp)：使用真实应用界面的交互测试。
 
 ---
 
-This standalone desktop demo uses the library's public API. Choose one of five
+This standalone desktop demo uses the library's public API. Choose one of six
 samples and edit its Markdown. Live preview coalesces changes in cancellable 120 ms
 windows, refreshing during continuous typing;
 pause it for manual rendering. Statistics show tail parsing and prefix reuse.

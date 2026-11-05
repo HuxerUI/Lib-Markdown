@@ -7,6 +7,10 @@ namespace huxerui::markdown::detail {
 struct OriginalLink {
   TextRange range;
   std::string destination;
+  NodeKind kind = NodeKind::Link;
+  unsigned footnote_number = 0;
+  std::string footnote_label;
+  unsigned footnote_reference = 0;
 };
 
 struct InlineResult {
