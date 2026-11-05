@@ -15,10 +15,10 @@ std::string activated;
 #endif
 
 int main() { return Run([] {
-  const auto theme = MarkdownTheme::FromTheme(MaterialDarkThemeSpec());
+  const auto theme = MarkdownStyle::FromTheme(MaterialDarkThemeSpec());
   CHECK(theme.body.foreground == MaterialDarkThemeSpec().colors.on_surface);
   const auto doc = ParseMarkdown("\xF0\x9F\x98\x80 [**bold** *italic*](../guide.md)[next](../guide.md) ~~gone~~ `code`");
-  const auto value = markdown::detail::BuildInline(doc->Root().children[0], theme);
+  const auto value = markdown::detail::BuildInline(doc.Root().children[0], theme);
   CHECK(value.text.PlainText() == "\xF0\x9F\x98\x80 bold italicnext gone code");
   CHECK(value.text.Length() == 28);
   CHECK(value.links.size() == 2);
@@ -40,26 +40,26 @@ int main() { return Run([] {
   }
   CHECK(bold && italic && strike && code);
   const auto unsafe = ParseMarkdown("[x](javascript:alert%281%29) [ok](https://example.com)");
-  const auto filtered = markdown::detail::BuildInline(unsafe->Root(), theme);
+  const auto filtered = markdown::detail::BuildInline(unsafe.Root(), theme);
   CHECK(filtered.links.size() == 1);
   CHECK(filtered.links[0].destination == "https://example.com");
-  const auto custom = markdown::detail::BuildInline(unsafe->Root(), theme, [](std::string_view) { return true; });
+  const auto custom = markdown::detail::BuildInline(unsafe.Root(), theme, [](std::string_view) { return true; });
   CHECK(custom.links.size() == 2);
-  const auto nested = markdown::detail::BuildInline(ParseMarkdown("***both***")->Root(), theme);
+  const auto nested = markdown::detail::BuildInline(ParseMarkdown("***both***").Root(), theme);
   CHECK(nested.text.StyleRanges()[0].style.font_weight == FontWeight::Bold);
   CHECK(nested.text.StyleRanges()[0].style.font_slant == FontSlant::Italic);
-  const auto image_link = markdown::detail::BuildInline(ParseMarkdown("[![alt [inside](https://inner.example)](image.png)](https://outer.example)")->Root(), theme);
-  CHECK(image_link.text.PlainText() == ParseMarkdown("[![alt [inside](https://inner.example)](image.png)](https://outer.example)")->PlainText());
+  const auto image_link = markdown::detail::BuildInline(ParseMarkdown("[![alt [inside](https://inner.example)](image.png)](https://outer.example)").Root(), theme);
+  CHECK(image_link.text.PlainText() == ParseMarkdown("[![alt [inside](https://inner.example)](image.png)](https://outer.example)").PlainText());
   CHECK(image_link.links.size() == 1);
   CHECK(image_link.links[0].destination == "https://outer.example");
 
-  Throws<std::invalid_argument>([] { (void)Markdown(std::shared_ptr<const MarkdownDocument>{}); });
-  auto invalid = MarkdownTheme{};
+  (void)Markdown(MarkdownDocument{});
+  auto invalid = MarkdownStyle{};
   invalid.table_cell_width = 0;
-  Throws<std::invalid_argument>([&] { (void)Markdown("x", {.theme = invalid}); });
-  invalid = MarkdownTheme{};
+  Throws<std::invalid_argument>([&] { (void)Markdown("x", {.style = invalid}); });
+  invalid = MarkdownStyle{};
   invalid.heading_sizes[0] = std::numeric_limits<float>::quiet_NaN();
-  Throws<std::invalid_argument>([&] { (void)Markdown("x", {.theme = invalid}); });
+  Throws<std::invalid_argument>([&] { (void)Markdown("x", {.style = invalid}); });
 
 #ifdef MARKDOWN_HAS_UI_TESTING
   using namespace huxerui::testing;
@@ -69,7 +69,7 @@ int main() { return Run([] {
       Button("Swap").OnClick([swapped]() mutable { swapped = !swapped.Get(); }),
       ScrollView(Markdown(swapped.Get() ? "# Updated" :
           "# Native\n\n[Go](../guide.md)\n\n- **first**\n  - nested\n\n> quote\n\n```cpp\nint n;\n```\n\n| A | B |\n|---|---|\n| long text wraps inside a fixed column | cell |\n\n![alt](image.png)",
-          {.on_link = [](const std::string& target) { activated = target; }})).With(Grow{}),
+          {}).On<MarkdownEvents::LinkActivated>([](const MarkdownLinkActivation& event) { activated = event.destination; })).With(Grow{}),
     }.With(CrossAlign(CrossAxisAlignment::Stretch));
   }, {.window = {.initial_size = {640, 900}}, .show_debug_overlay = false});
   UiTest ui(app);

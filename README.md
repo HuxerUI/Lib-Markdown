@@ -2,6 +2,8 @@
 
 [简体中文](README.zh-CN.md)
 
+The 0.2 API includes source-breaking changes. See the [migration guide](docs/migration-0.2.md).
+
 Native Markdown content for [HuxerUI](https://github.com/HuxerUI/HuxerUI), with a
 CommonMark parser, configurable GFM extensions, and ordinary declarative views.
 
@@ -36,11 +38,11 @@ using namespace huxerui;
 using namespace huxerui::markdown;
 
 View Article() {
-  return ScrollView(Markdown("# Hello\n\n**Native** Markdown.", {
-    .on_link = [](const std::string& destination) {
+  return ScrollView(Markdown("# Hello\n\n**Native** Markdown.")
+    .On<MarkdownEvents::LinkActivated>([](const MarkdownLinkActivation& event) {
       // Navigate using your application's routing policy.
-    },
-  }));
+      // event.destination preserves the original decoded address.
+    }));
 }
 ```
 
@@ -58,41 +60,64 @@ return Markdown(document);
 ```
 
 `MarkdownDocument::Root()` exposes a read-only syntax tree; `PlainText()` extracts
-visible text. The parser-only public API is `<huxerui/markdown/document.h>` and
+visible text. `MarkdownDocument` is a value handle: copies share immutable storage,
+and equality compares snapshot identity. Default construction creates a valid empty
+document; moving leaves the source valid and sharing the same snapshot. Access nodes
+with `document.Root()`, retaining an owner while using borrowed node references.
+The parser-only public API is `<huxerui/markdown/document.h>` and
 does not depend on HuxerUI. `ParseOptions` can disable individual extensions,
 make soft line breaks hard, or lower the input/depth limits.
+
+The source overload of `Markdown` uses default parsing. For custom parsing, prepare
+the document explicitly; display options never contain ignored parse settings:
+
+```cpp
+auto document = ParseMarkdown(source, {
+  .soft_break_mode = SoftBreakMode::LineBreak,
+});
+return Markdown(document);
+```
 
 ## Themes and custom rendering
 
 The default appearance follows the enclosing HuxerUI theme, including font family,
-body size, foregrounds, and surfaces. Use `MarkdownOptions::theme` to override it:
+body size, foregrounds, and surfaces. Use `MarkdownOptions::style` for a complete
+local appearance override; it is not an inheritable Markdown theme environment:
 
 ```cpp
-auto theme = MarkdownTheme::FromTheme(UseTheme());
-theme.body.font = theme.body.font.WithSize(18.0F);
-theme.table_cell_width = 220.0F;
+auto style = MarkdownStyle::FromTheme(UseTheme());
+style.body.font = style.body.font.WithSize(18.0F);
+style.table_cell_width = 220.0F;
 
 return Markdown(document, {
-  .theme = theme,
+  .style = style,
   .selectable = true,
-  .code_renderer = [](const MarkdownNode& code) -> View {
-    // code.text includes newlines; code.language and code.info preserve the fence info.
+  .code_block_renderer = [](const MarkdownNode& code) -> View {
+    // code.text includes newlines; code.language and code.fence_info preserve the fence info.
     return Text(code.text).Style({Font::Monospace(14.0F), Color::Rgb(40, 50, 60)});
   },
 });
 ```
 
-`image_renderer` receives a standalone paragraph's image node (`destination`,
+`standalone_image_renderer` receives a standalone paragraph's image node (`destination`,
 `title`, and alt text via `PlainText(node)`). Supply your loader, URI policy,
 dimensions, and placeholder there. Images otherwise render alt text; embedded
 inline images always render alt text. No image is fetched automatically.
+Both renderer callbacks execute during UI composition and borrow their node for
+that call. Copy needed fields or retain the document for delayed callbacks. They
+may run again on recomposition and do not guarantee a particular invocation count.
 
 ## Links and input behavior
 
-`on_link` receives the original decoded destination, including `../relative.md`
-and `#anchors`. HuxerUI never opens it automatically. By default, only HTTP(S),
+`MarkdownEvents::LinkActivated` receives `MarkdownLinkActivation::destination`, the
+original decoded address, including Unicode paths, `../relative.md` and `#anchors`.
+Handlers run in the owning UI scope, update on recomposition, and disconnect on
+unmounting. Copy the payload to retain it after the callback. HuxerUI never opens
+the address automatically. By default, only HTTP(S),
 mailto, and relative targets are interactive. Explicit custom schemes require
-`link_policy`. Unsafe destinations stay readable as plain text. Resolve relative
+`link_policy`. Rejected destinations stay readable as plain text. The predicate
+`IsDefaultLinkAllowed()` describes the default allow policy, not a URI-validation
+or navigation-safety guarantee. Resolve relative
 paths against an application-controlled base before opening them.
 
 Raw HTML is displayed literally. HTML entities are decoded in ordinary text and
@@ -136,6 +161,9 @@ ctest --test-dir build -C Release --output-on-failure
 when building HuxerUI from source. Without it, view tests still cover attributed
 text, theme derivation, option validation, and link policy. Run `markdown_preview`
 from the build output to see mixed Chinese/English content and theme switching.
+With the testing library, the event suite also verifies instance isolation,
+handler replacement, original destinations, and unmount disconnection. Public API
+examples are compiled from [tests/api_examples.cpp](tests/api_examples.cpp).
 
 For a standalone parser build without HuxerUI:
 

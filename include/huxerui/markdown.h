@@ -10,7 +10,12 @@
 
 namespace huxerui::markdown {
 
-struct MarkdownTheme {
+/// Complete local appearance override, in DIPs. Omission in MarkdownOptions follows
+/// the enclosing HuxerUI theme; an explicit value replaces the complete appearance.
+/// Heading sizes and table_cell_width must be finite and positive; spacing, indent,
+/// padding and corner_radius must be finite and nonnegative. Invalid values throw
+/// invalid_argument at declaration or composition. This is not an Environment theme.
+struct MarkdownStyle {
   TextStyle body{Font::System(16.0F), Color::Rgb(31, 35, 40)};
   TextStyle code{Font::Monospace(14.0F), Color::Rgb(31, 35, 40)};
   Color link = Color::Rgb(9, 105, 218);
@@ -27,30 +32,59 @@ struct MarkdownTheme {
   float corner_radius = 6.0F;
   float table_cell_width = 180.0F;
 
-  /// Derive typography and colors from an ambient HuxerUI theme.
-  [[nodiscard]] static MarkdownTheme FromTheme(const ThemeSpec& theme);
+  /// Derive a complete appearance from an explicit HuxerUI theme snapshot.
+  [[nodiscard]] static MarkdownStyle FromTheme(const ThemeSpec& theme);
 };
 
+/// Predicate for an original decoded destination, borrowed only during the call.
+/// Invoked during composition, not navigation. Empty uses IsDefaultLinkAllowed.
+using MarkdownLinkPolicy = std::function<bool(std::string_view)>;
+/// Produces a View for CodeBlock only, on the composing UI thread. The node is
+/// borrowed for the call; copy needed fields into delayed callbacks. Invocation
+/// count is not stable across recompositions. Exceptions propagate to the caller.
+using MarkdownCodeBlockRenderer = std::function<View(const MarkdownNode&)>;
+/// Produces a View for the Image that is the sole child of a paragraph. The same
+/// borrowing/thread rules apply as for MarkdownCodeBlockRenderer; inline images
+/// use alt text. The application owns URI policy, loading, sizing and placeholders.
+using MarkdownStandaloneImageRenderer = std::function<View(const MarkdownNode&)>;
+
+/// Display configuration only. Set ParseOptions with ParseMarkdown before rendering.
 struct MarkdownOptions {
-  ParseOptions parse;
   /// Omitted: resolve the ambient theme inside the component's composition scope.
-  std::optional<MarkdownTheme> theme;
+  std::optional<MarkdownStyle> style;
+  /// Wrap content in native SelectionArea for selection/copy (default true).
   bool selectable = true;
-  /// Called with the original decoded Markdown destination, including relative URLs.
-  /// The component never opens a browser or fetches a destination automatically.
-  std::function<void(const std::string&)> on_link;
-  /// Omitted: IsSafeMarkdownLink. Applications may explicitly allow their own schemes.
-  std::function<bool(std::string_view)> link_policy;
+  /// Omitted: IsDefaultLinkAllowed. Applications may explicitly allow their own schemes.
+  MarkdownLinkPolicy link_policy;
   /// Optional rendering of standalone paragraph images. Inline images use alt text.
   /// The callback owns loading, URI policy, sizing, and error placeholders.
-  std::function<View(const MarkdownNode&)> image_renderer;
+  MarkdownStandaloneImageRenderer standalone_image_renderer;
   /// Optional replacement for a fenced/indented code block (e.g. syntax highlighting).
-  std::function<View(const MarkdownNode&)> code_renderer;
+  MarkdownCodeBlockRenderer code_block_renderer;
+};
+
+/// Owned link information. Destination preserves decoded relative paths, anchors and Unicode.
+struct MarkdownLinkActivation {
+  /// Decoded original address, without URI normalization or automatic navigation.
+  std::string destination;
+};
+
+/// Events bound on Markdown(...).On<Key>(handler). Run in the owning UI scope;
+/// handlers are replaced on recomposition and disconnected after unmounting.
+struct MarkdownEvents {
+  /// Requests application-owned navigation once per activation. No automatic navigation.
+  /// The payload reference is borrowed for the callback; copy it to retain it.
+  /// Policy-rejected links do not emit. Missing handlers do nothing; handler exceptions propagate.
+  struct LinkActivated : Event<void(const MarkdownLinkActivation&)> {};
 };
 
 /// Native declarative Markdown content. Wrap in ScrollView to scroll vertically.
-/// Source overload parses immediately; use a prepared document to avoid parsing on recomposition.
+/// Parses immediately with default ParseOptions, propagating ParseMarkdown exceptions.
+/// Returns a deferred UI scope; custom callbacks execute on the composing UI thread.
 [[nodiscard]] View Markdown(std::string_view source, MarkdownOptions options = {});
-[[nodiscard]] View Markdown(std::shared_ptr<const MarkdownDocument> document, MarkdownOptions options = {});
+/// Retains a cheap immutable document snapshot without reparsing on recomposition.
+/// For nondefault parsing call ParseMarkdown(source, options) first. A default-constructed
+/// document displays empty content. Attach MarkdownEvents on the returned View.
+[[nodiscard]] View Markdown(MarkdownDocument document, MarkdownOptions options = {});
 
 } // namespace huxerui::markdown

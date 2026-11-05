@@ -113,11 +113,11 @@ int EnterBlock(MD_BLOCKTYPE type, void* detail, void* context) noexcept {
     if (type == MD_BLOCK_DOC) return;
     NodeKind kind;
     switch (type) {
-    case MD_BLOCK_QUOTE: kind = NodeKind::Quote; break;
+    case MD_BLOCK_QUOTE: kind = NodeKind::BlockQuote; break;
     case MD_BLOCK_UL: kind = NodeKind::UnorderedList; break;
     case MD_BLOCK_OL: kind = NodeKind::OrderedList; break;
     case MD_BLOCK_LI: kind = NodeKind::ListItem; break;
-    case MD_BLOCK_HR: kind = NodeKind::Rule; break;
+    case MD_BLOCK_HR: kind = NodeKind::ThematicBreak; break;
     case MD_BLOCK_H: kind = NodeKind::Heading; break;
     case MD_BLOCK_CODE: kind = NodeKind::CodeBlock; break;
     case MD_BLOCK_P: kind = NodeKind::Paragraph; break;
@@ -143,7 +143,7 @@ int EnterBlock(MD_BLOCKTYPE type, void* detail, void* context) noexcept {
     }
     if (type == MD_BLOCK_CODE) {
       const auto& d = *static_cast<MD_BLOCK_CODE_DETAIL*>(detail);
-      node.info = Attribute(d.info);
+      node.fence_info = Attribute(d.info);
       node.language = Attribute(d.lang);
     }
     if (type == MD_BLOCK_TH || type == MD_BLOCK_TD) {
@@ -217,7 +217,7 @@ int TextCallback(MD_TEXTTYPE type, const MD_CHAR* data, MD_SIZE size, void* cont
     case MD_TEXT_ENTITY: text = DecodeEntity({data, size}); break;
     case MD_TEXT_NULLCHAR: text = "\xEF\xBF\xBD"; break;
     case MD_TEXT_BR: text = "\n"; break;
-    case MD_TEXT_SOFTBR: text = b.options.hard_soft_breaks ? "\n" : " "; break;
+    case MD_TEXT_SOFTBR: text = b.options.soft_break_mode == SoftBreakMode::LineBreak ? "\n" : " "; break;
     default: text.assign(data, size); break;
     }
     auto& parent = *b.stack.back();
@@ -242,15 +242,27 @@ void CollectText(const MarkdownNode& node, std::string& out) {
 
 } // namespace
 
-MarkdownDocument::MarkdownDocument(MarkdownNode root) : root_(std::move(root)) {}
-std::string MarkdownDocument::PlainText() const { return markdown::PlainText(root_); }
+struct MarkdownDocument::Storage {
+  MarkdownNode root;
+  explicit Storage(MarkdownNode value) : root(std::move(value)) {}
+};
+
+MarkdownDocument::MarkdownDocument() {
+  static const auto empty = std::make_shared<const Storage>(MarkdownNode{.kind = NodeKind::Document});
+  storage_ = empty;
+}
+MarkdownDocument::MarkdownDocument(MarkdownNode root) : storage_(std::make_shared<const Storage>(std::move(root))) {}
+const MarkdownNode& MarkdownDocument::Root() const noexcept { return storage_->root; }
+std::string MarkdownDocument::PlainText() const { return markdown::PlainText(Root()); }
 std::string PlainText(const MarkdownNode& node) {
   std::string out;
   CollectText(node, out);
   return out;
 }
 
-std::shared_ptr<const MarkdownDocument> ParseMarkdown(std::string_view source, ParseOptions options) {
+MarkdownDocument ParseMarkdown(std::string_view source, ParseOptions options) {
+  if (options.soft_break_mode != SoftBreakMode::Space && options.soft_break_mode != SoftBreakMode::LineBreak)
+    throw std::invalid_argument("Invalid Markdown soft break mode");
   if (!options.max_input_bytes || !options.max_nesting || options.max_nesting > 512)
     throw std::invalid_argument("Markdown limits must be positive; max_nesting must be <= 512");
   if (source.size() > options.max_input_bytes || source.size() > std::numeric_limits<MD_SIZE>::max())
@@ -272,10 +284,10 @@ std::shared_ptr<const MarkdownDocument> ParseMarkdown(std::string_view source, P
   const int result = md_parse(source.empty() ? "" : source.data(), static_cast<MD_SIZE>(source.size()), &parser, &builder);
   if (builder.error) std::rethrow_exception(builder.error);
   if (result != 0) throw std::runtime_error("MD4C could not parse Markdown");
-  return std::shared_ptr<const MarkdownDocument>(new MarkdownDocument(std::move(builder.root)));
+  return MarkdownDocument(std::move(builder.root));
 }
 
-bool IsSafeMarkdownLink(std::string_view target) noexcept {
+bool IsDefaultLinkAllowed(std::string_view target) noexcept {
   if (target.empty()) return false;
   for (const unsigned char c : target) if (c <= 0x20 || c == 0x7F || c == '\\') return false;
   if (target.starts_with("//")) return false;

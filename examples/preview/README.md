@@ -15,6 +15,11 @@
 编辑器。链接只显示回调，不会打开浏览器。图片示例仅识别 `demo:landscape`，
 不请求网络。组件默认渲染行为可以通过「自定义渲染」开关对比。
 
+demo 使用 0.2 API：State 保存 `MarkdownDocument` 值，通过
+`.On<MarkdownEvents::LinkActivated>()` 处理链接，使用 `code_block_renderer` 和
+`standalone_image_renderer` 自定义显示。新文档的滚动重置使用 demo 自己的版本号，
+主题切换复用已有快照。升级旧接入代码请参考 [迁移说明](../../docs/migration-0.2.md)。
+
 ## 独立构建
 
 需要 CMake 3.20+、C99/C++20 编译器，以及带富文本接口的 HuxerUI SDK 或源码。

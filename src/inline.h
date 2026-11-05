@@ -14,7 +14,7 @@ struct InlineResult {
   std::vector<OriginalLink> links;
 };
 
-InlineResult BuildInline(const MarkdownNode& node, const MarkdownTheme& theme,
-                         const std::function<bool(std::string_view)>& policy = {});
+InlineResult BuildInline(const MarkdownNode& node, const MarkdownStyle& theme,
+                         const MarkdownLinkPolicy& policy = {});
 
 } // namespace huxerui::markdown::detail

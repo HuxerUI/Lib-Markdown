@@ -2,6 +2,8 @@
 
 [English](README.md) · HuxerUI 原生 Markdown 扩展，使用 C++20 和 MD4C。
 
+0.2 包含源代码不兼容的 API 调整，升级请参考 [迁移说明](docs/migration-0.2.md)。
+
 支持 CommonMark 标题、段落、嵌套列表、引用、分隔线、代码块，以及 GFM
 表格、删除线、任务列表和自动链接。文本由 HuxerUI `AttributedText` 渲染，
 支持选中复制、Unicode、明暗主题和链接回调。
@@ -23,33 +25,45 @@ using namespace huxerui;
 using namespace huxerui::markdown;
 
 View Article() {
-  return ScrollView(Markdown("# 你好\n\n这是 **Markdown**。", {
-    .on_link = [](const std::string& destination) {
-      // 由应用决定如何处理链接。
-    },
-  }));
+  return ScrollView(Markdown("# 你好\n\n这是 **Markdown**。")
+    .On<MarkdownEvents::LinkActivated>([](const MarkdownLinkActivation& event) {
+      // 由应用决定如何处理 event.destination。
+    }));
 }
 ```
 
 长文档可以先在工作线程调用 `ParseMarkdown(source)`，保留返回的
-`std::shared_ptr<const MarkdownDocument>`，再在 UI 中传给 `Markdown(document)`。
+`MarkdownDocument` 值句柄，再在 UI 中传给 `Markdown(document)`。复制共享只读存储，
+相等比较按快照身份判断；默认构造是有效空文档，移动后原对象仍有效。
+通过 `document.Root()` 读取节点，借用节点期间保留快照所有者。
 这样重组界面时不必重复解析。输入字符串不需要持续存活。
 
 ## 配置
 
-- `parse`：分别控制表格、删除线、任务列表、自动链接和换行规则。
-- `theme`：省略时跟随外层 HuxerUI 主题；可以从 `MarkdownTheme::FromTheme(UseTheme())` 修改。
+- `ParseOptions`：传给 `ParseMarkdown`，分别控制表格、删除线、任务列表、自动链接和换行规则。
+- `style`：省略时跟随外层 HuxerUI 主题；可从 `MarkdownStyle::FromTheme(UseTheme())` 派生完整局部样式。
 - `selectable`：默认启用文本选择与复制。
-- `on_link`：接收原始解码后的地址，包括相对路径和锚点；组件不会自动打开链接。
+- `MarkdownEvents::LinkActivated`：通过 `.On<...>()` 绑定，接收包含原始地址的事件；组件不自动导航。
 - `link_policy`：覆盖默认的 HTTP(S)、mailto 和相对地址策略，允许应用自定义协议。
-- `code_renderer`：接收代码文本、语言和完整 fence 信息，可接入语法高亮。
-- `image_renderer`：自定义独占段落图片的显示与加载；默认和行内图片显示替代文字。
+- `code_block_renderer`：仅处理代码块，接收 `text`、`language` 和 `fence_info`，可接入语法高亮。
+- `standalone_image_renderer`：仅处理独占段落图片；默认和行内图片显示替代文字。
+
+源码重载使用默认解析选项；自定义解析时显式准备文档：
+
+```cpp
+auto document = ParseMarkdown(source, {.soft_break_mode = SoftBreakMode::LineBreak});
+return Markdown(document);
+```
+
+renderer 在 UI 组合时执行，节点引用仅在回调期间借用，延迟使用时复制需要的数据或保留文档。
+事件处理器在重组后更新，组件卸载后停止通知；事件引用需要保留时也应复制。
+`IsDefaultLinkAllowed()` 只表达默认允许策略，不代表完整 URI 校验或导航安全保证。
 
 原始 HTML 按文字显示。默认输入上限为 8 MiB、嵌套上限为 128，超过限制会抛出
 `std::length_error`；无效 UTF-8 会抛出 `std::invalid_argument`。
 
 任务复选框只读；表格使用固定列宽并支持横向滚动；默认代码块为可换行的等宽文本。
-当前版本不包含编辑器、增量解析、虚拟化、数学公式或 HTML 执行。
+组件本身不包含编辑器、增量解析、虚拟化、数学公式或 HTML 执行。
 
 ## 交互 Demo
 

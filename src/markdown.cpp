@@ -12,8 +12,8 @@ namespace huxerui::markdown {
 namespace {
 
 struct InlineBuilder {
-  const MarkdownTheme& theme;
-  const std::function<bool(std::string_view)>& policy;
+  const MarkdownStyle& theme;
+  const MarkdownLinkPolicy& policy;
   std::string text;
   std::vector<TextStyleRange> styles;
   std::vector<TextLinkRange> links;
@@ -45,7 +45,7 @@ struct InlineBuilder {
       Append(PlainText(node), style);
       return;
     case NodeKind::Link: {
-      const bool allowed = policy ? policy(node.destination) : IsSafeMarkdownLink(node.destination);
+      const bool allowed = policy ? policy(node.destination) : IsDefaultLinkAllowed(node.destination);
       const auto begin = length;
       if (allowed) {
         style.foreground = theme.link;
@@ -69,7 +69,7 @@ struct InlineBuilder {
   }
 };
 
-void ValidateTheme(const MarkdownTheme& theme) {
+void ValidateStyle(const MarkdownStyle& theme) {
   for (const auto size : theme.heading_sizes)
     if (!std::isfinite(size) || size <= 0) throw std::invalid_argument("Markdown heading sizes must be positive and finite");
   for (const auto value : {theme.block_spacing, theme.list_spacing, theme.indent, theme.code_padding, theme.corner_radius})
@@ -80,7 +80,8 @@ void ValidateTheme(const MarkdownTheme& theme) {
 
 class Renderer {
 public:
-  Renderer(const MarkdownOptions& options, MarkdownTheme theme) : options_(options), theme_(std::move(theme)) {}
+  Renderer(const MarkdownOptions& options, MarkdownStyle theme, EventEmitter events)
+      : options_(options), theme_(std::move(theme)), events_(std::move(events)) {}
 
   View Blocks(const MarkdownNode& parent, float spacing) const {
     std::vector<View> children;
@@ -92,10 +93,13 @@ private:
   View Paragraph(const MarkdownNode& node, TextStyle style, TextAlign alignment = TextAlign::Leading) const {
     auto inline_text = detail::BuildInline(node, theme_, options_.link_policy);
     return Text(std::move(inline_text.text)).Style(std::move(style)).Align(alignment)
-        .On<TextEvents::LinkActivated>([callback = options_.on_link, links = std::move(inline_text.links)](const TextLinkActivation& event) {
-          if (!callback) return;
+        .On<TextEvents::LinkActivated>([events = events_, links = std::move(inline_text.links)](const TextLinkActivation& event) {
           for (const auto& link : links) {
-            if (link.range == event.range) { callback(link.destination); return; }
+            if (link.range == event.range) {
+              const MarkdownLinkActivation activation{link.destination};
+              events.Emit<MarkdownEvents::LinkActivated>(activation);
+              return;
+            }
           }
         });
   }
@@ -149,20 +153,20 @@ private:
       return Paragraph(node, std::move(style));
     }
     case NodeKind::Paragraph:
-      if (options_.image_renderer && node.children.size() == 1 && node.children.front().kind == NodeKind::Image)
-        return options_.image_renderer(node.children.front());
+      if (options_.standalone_image_renderer && node.children.size() == 1 && node.children.front().kind == NodeKind::Image)
+        return options_.standalone_image_renderer(node.children.front());
       return Paragraph(node, theme_.body);
     case NodeKind::CodeBlock:
-      if (options_.code_renderer) return options_.code_renderer(node);
+      if (options_.code_block_renderer) return options_.code_block_renderer(node);
       return Text(node.text).Style(theme_.code)
           .With(Padding(theme_.code_padding), Background{theme_.code_background}, CornerRadius(theme_.corner_radius));
-    case NodeKind::Quote:
+    case NodeKind::BlockQuote:
       return Blocks(node, theme_.block_spacing)
           .With(Padding(EdgeInsets{8.0F, 8.0F, 8.0F, theme_.indent}),
                 Background{theme_.quote_background}, Border{theme_.border, 1.0F});
     case NodeKind::UnorderedList:
     case NodeKind::OrderedList: return List(node);
-    case NodeKind::Rule:
+    case NodeKind::ThematicBreak:
       return Column(std::vector<View>{}).With(Frame{.height = 1.0F}, Background{theme_.border});
     case NodeKind::Table: return Table(node);
     case NodeKind::Document:
@@ -172,14 +176,15 @@ private:
   }
 
   const MarkdownOptions& options_;
-  MarkdownTheme theme_;
+  MarkdownStyle theme_;
+  EventEmitter events_;
 };
 
 } // namespace
 
 namespace detail {
-InlineResult BuildInline(const MarkdownNode& node, const MarkdownTheme& theme,
-                         const std::function<bool(std::string_view)>& policy) {
+InlineResult BuildInline(const MarkdownNode& node, const MarkdownStyle& theme,
+                         const MarkdownLinkPolicy& policy) {
   InlineBuilder builder{theme, policy, {}, {}, {}, {}, 0};
   builder.Visit(node);
   return {AttributedText::FromRanges(std::move(builder.text), std::move(builder.styles), std::move(builder.links)),
@@ -187,8 +192,8 @@ InlineResult BuildInline(const MarkdownNode& node, const MarkdownTheme& theme,
 }
 } // namespace detail
 
-MarkdownTheme MarkdownTheme::FromTheme(const ThemeSpec& theme) {
-  MarkdownTheme result;
+MarkdownStyle MarkdownStyle::FromTheme(const ThemeSpec& theme) {
+  MarkdownStyle result;
   result.body = {Font::FromFamily(theme.typography.family, theme.typography.body_large), theme.colors.on_surface};
   result.code = {Font::Monospace(theme.typography.body_medium), theme.colors.on_surface};
   result.link = theme.colors.primary;
@@ -203,17 +208,16 @@ MarkdownTheme MarkdownTheme::FromTheme(const ThemeSpec& theme) {
 }
 
 View Markdown(std::string_view source, MarkdownOptions options) {
-  auto document = ParseMarkdown(source, options.parse);
+  auto document = ParseMarkdown(source);
   return Markdown(std::move(document), std::move(options));
 }
 
-View Markdown(std::shared_ptr<const MarkdownDocument> document, MarkdownOptions options) {
-  if (!document) throw std::invalid_argument("Markdown document must not be null");
-  if (options.theme) ValidateTheme(*options.theme);
+View Markdown(MarkdownDocument document, MarkdownOptions options) {
+  if (options.style) ValidateStyle(*options.style);
   return Scope([document = std::move(document), options = std::move(options)] {
-    const auto theme = options.theme.value_or(MarkdownTheme::FromTheme(UseTheme()));
-    ValidateTheme(theme);
-    auto content = Renderer(options, theme).Blocks(document->Root(), theme.block_spacing);
+    const auto theme = options.style ? *options.style : MarkdownStyle::FromTheme(UseTheme());
+    ValidateStyle(theme);
+    auto content = Renderer(options, theme, UseEvents()).Blocks(document.Root(), theme.block_spacing);
     if (options.selectable) return View(SelectionArea(std::move(content)));
     return content;
   });

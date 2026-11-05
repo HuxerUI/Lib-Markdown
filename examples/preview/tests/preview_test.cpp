@@ -23,7 +23,7 @@ private:
 int main(int argc, char** argv) { return Run([&] {
   CHECK(argc == 2);
   for (const auto& sample : markdown_preview::Samples())
-    CHECK(!markdown::ParseMarkdown(sample.source)->Root().children.empty());
+    CHECK(!markdown::ParseMarkdown(sample.source).Root().children.empty());
 
   UiTest ui(application, {.viewport = {1180, 820}, .resource_provider = std::make_shared<PreviewResources>(argv[1])});
   const auto preview = [&] { return ui.Find(UiSelector::Key("preview-scroll")); };

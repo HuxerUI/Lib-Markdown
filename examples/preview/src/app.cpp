@@ -67,6 +67,7 @@ View App() {
   auto custom = UseState(false);
   auto editor = UseState(SourceValue(Samples()[0].source));
   auto document = UseState(initial_document);
+  auto document_version = UseState(std::uint64_t{0});
   auto message = UseState(std::string("选择样例，或修改源码后点击渲染。链接地址会显示在这里。"));
 
   return MaterialTheme(dark.Get() ? MaterialDarkThemeSpec() : MaterialLightThemeSpec(), Scope([=] {
@@ -79,20 +80,23 @@ View App() {
             selected = i;
             editor = SourceValue(Samples()[i].source);
             document = ParseMarkdown(Samples()[i].source);
+            document_version = document_version.Get() + 1;
             custom = i == 3;
             message = "已载入：" + Samples()[i].name;
           }).Key("sample-" + std::to_string(i)));
     }
     MarkdownOptions options;
-    options.on_link = [message](const std::string& link) mutable { message = "链接：" + link; };
     if (custom.Get()) {
-      options.code_renderer = [theme](const MarkdownNode& code) { return CodeCard(code, theme); };
-      options.image_renderer = [theme](const MarkdownNode& image) { return LocalImage(image, theme); };
+      options.code_block_renderer = [theme](const MarkdownNode& code) { return CodeCard(code, theme); };
+      options.standalone_image_renderer = [theme](const MarkdownNode& image) { return LocalImage(image, theme); };
     }
 
-    View preview = Panel("渲染预览", ScrollView(Markdown(document.Get(), std::move(options)))
+    View preview = Panel("渲染预览", ScrollView(Markdown(document.Get(), std::move(options))
+        .On<MarkdownEvents::LinkActivated>([message](const MarkdownLinkActivation& event) mutable {
+          message = "链接：" + event.destination;
+        }))
         .With(ScrollBar{}).Key("preview-scroll"), theme)
-        .Key(reinterpret_cast<std::uintptr_t>(document.Get().get()));
+        .Key(document_version.Get());
     View body = std::move(preview);
     if (show_source.Get()) {
       View source = Panel("Markdown 源码", TextField(editor)
@@ -120,12 +124,14 @@ View App() {
         Button("渲染").OnClick([=]() mutable {
           try {
             document = ParseMarkdown(editor.Get().text);
+            document_version = document_version.Get() + 1;
             message = "已渲染：" + std::to_string(editor.Get().text.size()) + " 字节";
           } catch (const std::exception& error) { message = std::string("无法解析：") + error.what(); }
         }).Key("render"),
         Button("重置样例").OnClick([=]() mutable {
           editor = SourceValue(Samples()[selected.Get()].source);
           document = ParseMarkdown(Samples()[selected.Get()].source);
+          document_version = document_version.Get() + 1;
           message = "已重置当前样例";
         }).Key("reset"),
         Button(show_source.Get() ? "隐藏源码" : "显示源码")
