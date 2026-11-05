@@ -94,6 +94,7 @@ private:
   explicit MarkdownDocument(MarkdownNode root);
   std::shared_ptr<const Storage> storage_;
   friend MarkdownDocument ParseMarkdown(std::string_view, ParseOptions);
+  friend class MarkdownParseSession;
 };
 
 /// Parse CommonMark plus configurable GFM tables, tasks, autolinks and strikethrough.
@@ -102,6 +103,59 @@ private:
 /// May run on a worker. Owns all resulting text; the source need only survive this call.
 /// Empty source yields a valid empty document; no incremental state is retained.
 [[nodiscard]] MarkdownDocument ParseMarkdown(std::string_view source, ParseOptions options = {});
+
+/// How the latest successful session update produced its snapshot.
+enum class MarkdownParseMode { Unchanged, Incremental, Full };
+
+/// MD4C work for one update, not total CPU/memory work. Source validation/comparison
+/// and copying retained AST blocks are separate from parsed_bytes.
+struct MarkdownParseStats {
+  MarkdownParseMode mode = MarkdownParseMode::Unchanged;
+  std::size_t parsed_bytes = 0;
+  std::size_t reused_blocks = 0;
+  std::size_t total_blocks = 0;
+  bool operator==(const MarkdownParseStats&) const = default;
+};
+
+/// One replacement in the session's current source, measured in UTF-8 bytes, not
+/// HuxerUI's UTF-16 text offsets. Both boundaries must be at Unicode scalar boundaries.
+struct MarkdownEdit {
+  std::size_t start_byte = 0;
+  std::size_t removed_bytes = 0;
+  std::string inserted_text;
+};
+
+/// Stateful synchronous incremental parser with immutable output snapshots.
+/// Reuses an unchanged prefix at parser-confirmed top-level restart boundaries and
+/// reparses the tail. Potential reference definitions or an unavailable safe boundary
+/// trigger full parsing. Results have the same semantics as ParseMarkdown.
+/// Source scanning and assembling the owned AST remain linear; this is not a rope,
+/// persistent-node tree, incremental renderer, or virtualized view.
+/// Confine a session to one thread (or externally serialize access); retain/copy its
+/// document snapshots independently. No UI or HuxerUI dependency is required.
+class MarkdownParseSession final {
+public:
+  explicit MarkdownParseSession(ParseOptions options = {});
+  ~MarkdownParseSession();
+  MarkdownParseSession(const MarkdownParseSession&) = delete;
+  MarkdownParseSession& operator=(const MarkdownParseSession&) = delete;
+
+  /// Accepts complete UTF-8 source. Equal input preserves snapshot identity and parses
+  /// zero bytes. Failure preserves Source(), Document() and LastParseStats().
+  [[nodiscard]] MarkdownDocument Update(std::string_view source);
+  /// Applies one edit against the current source. Invalid byte ranges throw out_of_range;
+  /// split scalars/invalid UTF-8 throw invalid_argument; size/depth limits throw length_error.
+  [[nodiscard]] MarkdownDocument ApplyEdit(const MarkdownEdit& edit);
+  /// Borrowed UTF-8 source, invalidated by successful replacement or session destruction.
+  [[nodiscard]] std::string_view Source() const noexcept;
+  /// Borrowed current snapshot; copy it to retain it across updates/destruction.
+  [[nodiscard]] const MarkdownDocument& Document() const noexcept;
+  [[nodiscard]] MarkdownParseStats LastParseStats() const noexcept;
+
+private:
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
+};
 
 /// Default interaction policy: http(s), mailto and relative targets are allowed.
 /// Other explicit URI schemes, protocol-relative URLs and ASCII controls are rejected.

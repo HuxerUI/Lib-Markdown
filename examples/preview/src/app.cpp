@@ -5,6 +5,7 @@
 #include <exception>
 #include <cstdint>
 #include <sstream>
+#include <chrono>
 
 namespace markdown_preview {
 using namespace huxerui;
@@ -59,16 +60,67 @@ View Panel(std::string title, View content, const ThemeSpec& theme) {
          Background{theme.colors.surface}, Border{theme.colors.outline, 0.5F}, CornerRadius(12.0F));
 }
 
+struct PreviewSession {
+  MarkdownParseSession parser;
+  TaskHandle pending;
+  std::uint64_t request = 0;
+
+  void CancelPending() {
+    pending.Cancel();
+    ++request;
+  }
+};
+
+std::string DescribeParse(const MarkdownParseStats& stats) {
+  const char* mode = stats.mode == MarkdownParseMode::Incremental ? "增量解析" :
+      stats.mode == MarkdownParseMode::Full ? "全量解析" : "内容未变化";
+  return std::string(mode) + " · 重解析 " + std::to_string(stats.parsed_bytes) +
+      " 字节 · 复用 " + std::to_string(stats.reused_blocks) + "/" + std::to_string(stats.total_blocks) + " 块";
+}
+
+void PublishPreview(const std::shared_ptr<PreviewSession>& session, const std::string& source,
+                    State<MarkdownDocument> document, State<MarkdownParseStats> stats, State<std::string> message) {
+  try {
+    document = session->parser.Update(source);
+    stats = session->parser.LastParseStats();
+    message = "已更新预览：" + std::to_string(source.size()) + " 字节";
+  } catch (const std::exception& error) {
+    message = std::string("无法解析：") + error.what();
+  }
+}
+
+void RequestPreview(const std::shared_ptr<PreviewSession>& session, TaskScope tasks, std::string source,
+                    State<MarkdownDocument> document, State<MarkdownParseStats> stats,
+                    State<std::string> message, bool immediate = false) {
+  session->CancelPending();
+  if (immediate) { PublishPreview(session, source, document, stats, message); return; }
+  const auto request = session->request;
+  message = "等待实时预览…";
+  session->pending = tasks.Launch([=]() -> Task<void> {
+    co_await Delay(std::chrono::milliseconds(120));
+    if (session->request == request) PublishPreview(session, source, document, stats, message);
+  });
+}
+
 View App() {
   static const auto initial_document = ParseMarkdown(Samples()[0].source);
   auto selected = UseState(std::size_t{0});
   auto dark = UseState(false);
   auto show_source = UseState(true);
   auto custom = UseState(false);
+  auto live = UseState(true);
+  auto session = UseState(std::make_shared<PreviewSession>());
+  auto tasks = UseTaskScope();
   auto editor = UseState(SourceValue(Samples()[0].source));
   auto document = UseState(initial_document);
   auto document_version = UseState(std::uint64_t{0});
-  auto message = UseState(std::string("选择样例，或修改源码后点击渲染。链接地址会显示在这里。"));
+  auto stats = UseState(MarkdownParseStats{});
+  auto message = UseState(std::string("实时预览已开启，编辑源码后自动更新。"));
+  Lifecycle([=]() mutable {
+    (void)session.Get()->parser.Update(Samples()[0].source);
+    stats = session.Get()->parser.LastParseStats();
+    return [session] { session.Get()->CancelPending(); };
+  });
 
   return MaterialTheme(dark.Get() ? MaterialDarkThemeSpec() : MaterialLightThemeSpec(), Scope([=] {
     const auto theme = UseTheme();
@@ -79,7 +131,7 @@ View App() {
           .OnChanged([=](bool) mutable {
             selected = i;
             editor = SourceValue(Samples()[i].source);
-            document = ParseMarkdown(Samples()[i].source);
+            RequestPreview(session.Get(), tasks, Samples()[i].source, document, stats, message, true);
             document_version = document_version.Get() + 1;
             custom = i == 3;
             message = "已载入：" + Samples()[i].name;
@@ -102,7 +154,13 @@ View App() {
       View source = Panel("Markdown 源码", TextField(editor)
           .LineLimits(TextFieldLineLimits::MultiLine(1))
           .VerticalAlign(TextVerticalAlign::Top)
-          .OnChanged([editor](const TextEditingValue& next) mutable { editor = next; })
+          .OnChanged([=](const TextEditingValue& next) mutable {
+            const bool changed = next.text != editor.Get().text;
+            editor = next;
+            if (!changed) return;
+            if (live.Get()) RequestPreview(session.Get(), tasks, next.text, document, stats, message);
+            else session.Get()->CancelPending();
+          })
           .Key("source-editor"), theme);
       body = compact ? View(Column{std::move(source).With(Grow{}), std::move(body).With(Grow{})}
                                    .With(Spacing(12.0F), CrossAlign(CrossAxisAlignment::Stretch)))
@@ -122,15 +180,11 @@ View App() {
       Flow(std::move(samples)).With(Spacing(8.0F)),
       Flow{
         Button("渲染").OnClick([=]() mutable {
-          try {
-            document = ParseMarkdown(editor.Get().text);
-            document_version = document_version.Get() + 1;
-            message = "已渲染：" + std::to_string(editor.Get().text.size()) + " 字节";
-          } catch (const std::exception& error) { message = std::string("无法解析：") + error.what(); }
+          RequestPreview(session.Get(), tasks, editor.Get().text, document, stats, message, true);
         }).Key("render"),
         Button("重置样例").OnClick([=]() mutable {
           editor = SourceValue(Samples()[selected.Get()].source);
-          document = ParseMarkdown(Samples()[selected.Get()].source);
+          RequestPreview(session.Get(), tasks, Samples()[selected.Get()].source, document, stats, message, true);
           document_version = document_version.Get() + 1;
           message = "已重置当前样例";
         }).Key("reset"),
@@ -138,9 +192,15 @@ View App() {
             .OnClick([show_source]() mutable { show_source = !show_source.Get(); }).Key("source-toggle"),
         Checkbox("自定义渲染", custom.Get())
             .OnChanged([custom](bool enabled) mutable { custom = enabled; }).Key("custom-toggle"),
+        Checkbox("实时预览", live.Get()).OnChanged([=](bool enabled) mutable {
+          live = enabled;
+          if (enabled) RequestPreview(session.Get(), tasks, editor.Get().text, document, stats, message);
+          else { session.Get()->CancelPending(); message = "实时预览已暂停，点击渲染手动更新。"; }
+        }).Key("live-toggle"),
       }.With(Spacing(8.0F)),
       std::move(body).With(Grow{}),
       Text(message).With(Foreground{theme.colors.on_surface_variant}).Key("status"),
+      Text(DescribeParse(stats.Get())).With(Foreground{theme.colors.on_surface_variant}).Key("parse-stats"),
     }.With(Padding(compact ? 12.0F : 24.0F), Spacing(12.0F), CrossAlign(CrossAxisAlignment::Stretch),
            Background{theme.colors.background});
   }));

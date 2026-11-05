@@ -38,6 +38,25 @@ View Article() {
 通过 `document.Root()` 读取节点，借用节点期间保留快照所有者。
 这样重组界面时不必重复解析。输入字符串不需要持续存活。
 
+## 增量解析
+
+连续编辑时保留一个会话，将返回的不可变快照交给 `Markdown(document)`：
+
+```cpp
+MarkdownParseSession parser;
+auto document = parser.Update(source);
+document = parser.ApplyEdit({.start_byte = parser.Source().size(),
+                             .inserted_text = "\n新增段落。\n"});
+auto stats = parser.LastParseStats();
+// 编辑器提供完整源码时，也可以调用 parser.Update(next_source)。
+```
+
+编辑范围以 UTF-8 字节计数，必须落在 Unicode 标量边界，不能直接使用 UI 的 UTF-16
+选区偏移。会话复用安全边界之前的块并重解析尾部；引用定义或无法确认安全边界时全量解析。
+相同输入保留快照身份；失败保留上次成功的源码、快照和统计。会话同步执行，需串行访问。
+源码扫描和前部 AST 复制仍为线性开销，不代表增量渲染或虚拟化。
+详见 [增量解析契约](docs/incremental-parsing.md)。
+
 ## 配置
 
 - `ParseOptions`：传给 `ParseMarkdown`，分别控制表格、删除线、任务列表、自动链接和换行规则。
@@ -63,12 +82,13 @@ renderer 在 UI 组合时执行，节点引用仅在回调期间借用，延迟�
 `std::length_error`；无效 UTF-8 会抛出 `std::invalid_argument`。
 
 任务复选框只读；表格使用固定列宽并支持横向滚动；默认代码块为可换行的等宽文本。
-组件本身不包含编辑器、增量解析、虚拟化、数学公式或 HTML 执行。
+组件本身不包含可复用编辑器、虚拟化、数学公式或 HTML 执行。增量解析由独立会话提供。
 
 ## 交互 Demo
 
 [Markdown Playground](examples/preview/README.md) 提供源码编辑与渲染对照、五组样例、
-明暗主题、链接反馈和自定义代码/图片渲染。编辑后点击「渲染」，窄窗口自动上下排列。
+明暗主题、链接反馈和自定义代码/图片渲染。默认开启 120 ms 防抖实时预览，可关闭后点击
+「渲染」手动更新；底部显示重解析字节和复用块数。窄窗口自动上下排列。
 
 ```sh
 cmake -S examples/preview -B build-preview -DHUXERUI_HOME=/path/to/HuxerUI

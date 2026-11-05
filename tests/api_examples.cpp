@@ -18,6 +18,15 @@ View CustomParsing(std::string_view source) {
   return Markdown(document);
 }
 
+MarkdownDocument IncrementalParsing() {
+  MarkdownParseSession session;
+  (void)session.Update("# Hello\n\nFirst paragraph.\n\nSecond paragraph.\n");
+  auto document = session.ApplyEdit({.start_byte = session.Source().size(),
+                                    .inserted_text = "\nAppended paragraph.\n"});
+  (void)session.LastParseStats();
+  return document;
+}
+
 View Styled(MarkdownDocument document) {
   return Scope([document] {
     auto style = MarkdownStyle::FromTheme(UseTheme());

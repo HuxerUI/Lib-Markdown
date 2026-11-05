@@ -49,7 +49,7 @@ those references. The input string need only survive the parse call.
 
 用 `document.Root()` / `document.PlainText()` 替换箭头访问，State 直接保存文档值。
 相等比较基于快照身份，不再需要或支持通过公开指针地址识别文档。
-例如 demo 在接受新内容时递增自己的版本号，并用该版本号重置滚动位置。
+例如 demo 在切换或重置样例时递增自己的版本号，并用该版本号重置滚动位置；编辑保留滚动。
 
 ## Parsing and display options / 解析与显示配置
 
@@ -143,7 +143,9 @@ remain application-owned.
 - Rebuild the parser/library, application, demo and any precompiled dependents.
 - Check actual links, selection/copy, theme changes and custom renderers.
 
-This update does not introduce live preview, virtualization, incremental parsing,
-streaming or global Markdown theme inheritance. The demo still renders edited
-source when Render is clicked. Compiled target-API examples are available in
+The follow-up adds live preview and the optional `MarkdownParseSession` API;
+existing one-shot parsing needs no additional migration. See the
+[incremental parsing contract](incremental-parsing.md). Virtualization, a separate
+streaming API and global Markdown theme inheritance are not included.
+Compiled target-API examples are available in
 [tests/api_examples.cpp](../tests/api_examples.cpp).

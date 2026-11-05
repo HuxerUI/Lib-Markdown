@@ -15,5 +15,11 @@ Public API normalization; rebuild the library and applications together. See
 - Introduce SoftBreakMode and clarify AST/link-policy terminology.
 - Migrate the demo and compile public API examples; add event lifetime/isolation
   and document snapshot regressions.
+- Add MarkdownParseSession with full-source updates, UTF-8 byte edits, immutable
+  snapshots, safe prefix reuse/tail reparsing and diagnostic statistics. Fall back
+  to full parsing for potential references or unavailable restart boundaries.
+- Enable cancellable 120 ms live preview by default, with manual mode, error
+  retention, parse diagnostics and preserved scroll during editing.
+- Add differential parser edits and virtual-time live-preview interaction tests.
 
 No release tag has been created. Syntax support and rendering defaults are unchanged.

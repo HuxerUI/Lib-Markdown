@@ -1,6 +1,7 @@
 #include <huxerui/markdown/document.h>
 
 #include <charconv>
+#include <algorithm>
 #include <cstdint>
 #include <exception>
 #include <limits>
@@ -88,8 +89,16 @@ std::string Attribute(const MD_ATTRIBUTE& attribute) {
 }
 
 struct Builder {
+  struct Restart {
+    std::size_t byte;
+    std::size_t line_end;
+    std::size_t block;
+  };
   MarkdownNode root{.kind = NodeKind::Document};
   std::vector<MarkdownNode*> stack{&root};
+  std::string_view source;
+  std::vector<Restart> restarts;
+  bool first_content = true;
   ParseOptions options;
   std::exception_ptr error;
 
@@ -104,6 +113,46 @@ struct Builder {
     node.kind = kind;
     stack.push_back(&node);
     return node;
+  }
+
+  void RecordRestart(MD_TEXTTYPE type, const char* text) {
+    if (stack.size() < 2 || !first_content) return;
+    const auto kind = stack[1]->kind;
+    if (kind != NodeKind::Heading && kind != NodeKind::Paragraph) return;
+    const auto base = reinterpret_cast<std::uintptr_t>(source.data());
+    const auto pointer = reinterpret_cast<std::uintptr_t>(text);
+    if (source.empty() || pointer < base || pointer - base >= source.size()) {
+      first_content = false;
+      return;
+    }
+    first_content = false;
+    std::size_t begin = pointer - base;
+    while (begin && source[begin - 1] != '\n' && source[begin - 1] != '\r') --begin;
+    auto end = source.find_first_of("\r\n", begin);
+    if (end == std::string_view::npos) return; // An EOF line can still be extended.
+    const auto line = source.substr(begin, end - begin);
+    bool safe = false;
+    if (kind == NodeKind::Heading) {
+      std::size_t marker = 0;
+      while (marker < line.size() && marker < 3 && line[marker] == ' ') ++marker;
+      const auto start = marker;
+      while (marker < line.size() && line[marker] == '#') ++marker;
+      safe = marker > start && marker - start <= 6 &&
+          (marker == line.size() || line[marker] == ' ' || line[marker] == '\t');
+    } else if (type == MD_TEXT_NORMAL && stack.size() == 2 && begin > 0 && !line.starts_with("\xEF\xBB\xBF")) {
+      // A plain first line of a root paragraph, preceded by an unchanged blank line,
+      // establishes the same container closure in a suffix parse. Spans/breaks seen
+      // before raw text disqualify the paragraph (its actual first line may be earlier).
+      auto previous_end = begin;
+      if (previous_end && source[previous_end - 1] == '\n') --previous_end;
+      if (previous_end && source[previous_end - 1] == '\r') --previous_end;
+      auto previous_begin = previous_end;
+      while (previous_begin && source[previous_begin - 1] != '\n' && source[previous_begin - 1] != '\r') --previous_begin;
+      safe = std::all_of(source.begin() + previous_begin, source.begin() + previous_end,
+                         [](char c) { return c == ' ' || c == '\t'; });
+    }
+    if (source[end] == '\r' && end + 1 < source.size() && source[end + 1] == '\n') ++end;
+    if (safe) restarts.push_back({begin, end + 1, root.children.size() - 1});
   }
 };
 
@@ -130,6 +179,7 @@ int EnterBlock(MD_BLOCKTYPE type, void* detail, void* context) noexcept {
     default: throw std::runtime_error("Unexpected Markdown block");
     }
     auto& node = b.Push(kind);
+    if (b.stack.size() == 2) b.first_content = true;
     if (type == MD_BLOCK_H) node.heading_level = static_cast<MD_BLOCK_H_DETAIL*>(detail)->level;
     if (type == MD_BLOCK_UL) node.tight = static_cast<MD_BLOCK_UL_DETAIL*>(detail)->is_tight != 0;
     if (type == MD_BLOCK_OL) {
@@ -180,6 +230,9 @@ int LeaveBlock(MD_BLOCKTYPE type, void*, void* context) noexcept {
 int EnterSpan(MD_SPANTYPE type, void* detail, void* context) noexcept {
   auto& b = *static_cast<Builder*>(context);
   return b.Guard([&] {
+    // Paragraphs starting with a span might produce their first raw text on a later
+    // line. ATX headings are single-line and remain eligible through inline spans.
+    if (b.stack.size() >= 2 && b.stack[1]->kind == NodeKind::Paragraph) b.first_content = false;
     NodeKind kind;
     switch (type) {
     case MD_SPAN_EM: kind = NodeKind::Emphasis; break;
@@ -212,6 +265,7 @@ int LeaveSpan(MD_SPANTYPE, void*, void* context) noexcept {
 int TextCallback(MD_TEXTTYPE type, const MD_CHAR* data, MD_SIZE size, void* context) noexcept {
   auto& b = *static_cast<Builder*>(context);
   return b.Guard([&] {
+    b.RecordRestart(type, data);
     std::string text;
     switch (type) {
     case MD_TEXT_ENTITY: text = DecodeEntity({data, size}); break;
@@ -240,6 +294,42 @@ void CollectText(const MarkdownNode& node, std::string& out) {
   }
 }
 
+void ValidateInput(std::string_view source, const ParseOptions& options) {
+  if (options.soft_break_mode != SoftBreakMode::Space && options.soft_break_mode != SoftBreakMode::LineBreak)
+    throw std::invalid_argument("Invalid Markdown soft break mode");
+  if (!options.max_input_bytes || !options.max_nesting || options.max_nesting > 512)
+    throw std::invalid_argument("Markdown limits must be positive; max_nesting must be <= 512");
+  if (source.size() > options.max_input_bytes || source.size() > std::numeric_limits<MD_SIZE>::max())
+    throw std::length_error("Markdown input limit exceeded");
+  ValidateUtf8(source);
+}
+
+struct ParsedSource {
+  MarkdownNode root;
+  std::vector<Builder::Restart> restarts;
+};
+
+ParsedSource ParseValidatedSource(std::string_view source, const ParseOptions& options) {
+  Builder builder;
+  builder.source = source;
+  builder.options = options;
+  MD_PARSER parser{};
+  parser.flags = MD_FLAG_NOHTML;
+  if (options.tables) parser.flags |= MD_FLAG_TABLES;
+  if (options.strikethrough) parser.flags |= MD_FLAG_STRIKETHROUGH;
+  if (options.task_lists) parser.flags |= MD_FLAG_TASKLISTS;
+  if (options.autolinks) parser.flags |= MD_FLAG_PERMISSIVEAUTOLINKS;
+  parser.enter_block = EnterBlock;
+  parser.leave_block = LeaveBlock;
+  parser.enter_span = EnterSpan;
+  parser.leave_span = LeaveSpan;
+  parser.text = TextCallback;
+  const int result = md_parse(source.empty() ? "" : source.data(), static_cast<MD_SIZE>(source.size()), &parser, &builder);
+  if (builder.error) std::rethrow_exception(builder.error);
+  if (result != 0) throw std::runtime_error("MD4C could not parse Markdown");
+  return {std::move(builder.root), std::move(builder.restarts)};
+}
+
 } // namespace
 
 struct MarkdownDocument::Storage {
@@ -261,30 +351,94 @@ std::string PlainText(const MarkdownNode& node) {
 }
 
 MarkdownDocument ParseMarkdown(std::string_view source, ParseOptions options) {
-  if (options.soft_break_mode != SoftBreakMode::Space && options.soft_break_mode != SoftBreakMode::LineBreak)
-    throw std::invalid_argument("Invalid Markdown soft break mode");
-  if (!options.max_input_bytes || !options.max_nesting || options.max_nesting > 512)
-    throw std::invalid_argument("Markdown limits must be positive; max_nesting must be <= 512");
-  if (source.size() > options.max_input_bytes || source.size() > std::numeric_limits<MD_SIZE>::max())
-    throw std::length_error("Markdown input limit exceeded");
-  ValidateUtf8(source);
-  Builder builder;
-  builder.options = options;
-  MD_PARSER parser{};
-  parser.flags = MD_FLAG_NOHTML;
-  if (options.tables) parser.flags |= MD_FLAG_TABLES;
-  if (options.strikethrough) parser.flags |= MD_FLAG_STRIKETHROUGH;
-  if (options.task_lists) parser.flags |= MD_FLAG_TASKLISTS;
-  if (options.autolinks) parser.flags |= MD_FLAG_PERMISSIVEAUTOLINKS;
-  parser.enter_block = EnterBlock;
-  parser.leave_block = LeaveBlock;
-  parser.enter_span = EnterSpan;
-  parser.leave_span = LeaveSpan;
-  parser.text = TextCallback;
-  const int result = md_parse(source.empty() ? "" : source.data(), static_cast<MD_SIZE>(source.size()), &parser, &builder);
-  if (builder.error) std::rethrow_exception(builder.error);
-  if (result != 0) throw std::runtime_error("MD4C could not parse Markdown");
-  return MarkdownDocument(std::move(builder.root));
+  ValidateInput(source, options);
+  return MarkdownDocument(std::move(ParseValidatedSource(source, options).root));
+}
+
+struct MarkdownParseSession::Impl {
+  ParseOptions options;
+  std::string source;
+  MarkdownDocument document;
+  std::vector<Builder::Restart> restarts;
+  MarkdownParseStats stats;
+};
+
+MarkdownParseSession::MarkdownParseSession(ParseOptions options) : impl_(std::make_unique<Impl>()) {
+  ValidateInput({}, options);
+  impl_->options = options;
+}
+MarkdownParseSession::~MarkdownParseSession() = default;
+std::string_view MarkdownParseSession::Source() const noexcept { return impl_->source; }
+const MarkdownDocument& MarkdownParseSession::Document() const noexcept { return impl_->document; }
+MarkdownParseStats MarkdownParseSession::LastParseStats() const noexcept { return impl_->stats; }
+
+MarkdownDocument MarkdownParseSession::Update(std::string_view source) {
+  ValidateInput(source, impl_->options);
+  if (source == impl_->source) {
+    const auto count = impl_->document.Root().children.size();
+    impl_->stats = {MarkdownParseMode::Unchanged, 0, count, count};
+    return impl_->document;
+  }
+  std::size_t common = 0;
+  while (common < source.size() && common < impl_->source.size() && source[common] == impl_->source[common]) ++common;
+  std::size_t restart_byte = 0, retained = 0;
+  // Every supported reference definition has a literal closing label followed by
+  // ':'. The conservative check includes escaped/code occurrences intentionally.
+  // Definitions anywhere can resolve references in an otherwise unchanged prefix.
+  if (source.find("]:") == std::string_view::npos && impl_->source.find("]:") == std::string::npos) {
+    for (const auto& restart : impl_->restarts) {
+      if (restart.line_end > common) break;
+      if (restart.block > 0) { restart_byte = restart.byte; retained = restart.block; }
+    }
+  }
+  std::string owned_source(source);
+  auto parsed = ParseValidatedSource(std::string_view(owned_source).substr(restart_byte), impl_->options);
+  std::vector<Builder::Restart> restarts;
+  if (retained) {
+    MarkdownNode combined{.kind = NodeKind::Document};
+    combined.children.reserve(retained + parsed.root.children.size());
+    const auto& old = impl_->document.Root().children;
+    combined.children.insert(combined.children.end(), old.begin(), old.begin() + retained);
+    for (auto& block : parsed.root.children) combined.children.push_back(std::move(block));
+    parsed.root = std::move(combined);
+    for (const auto& restart : impl_->restarts)
+      if (restart.block < retained) restarts.push_back(restart);
+  }
+  for (auto restart : parsed.restarts) {
+    restart.byte += restart_byte;
+    restart.line_end += restart_byte;
+    restart.block += retained;
+    restarts.push_back(restart);
+  }
+  MarkdownDocument next(std::move(parsed.root));
+  const MarkdownParseStats stats{
+    retained ? MarkdownParseMode::Incremental : MarkdownParseMode::Full,
+    owned_source.size() - restart_byte, retained, next.Root().children.size(),
+  };
+  // Commit only after parsing, copying and all allocations succeed.
+  impl_->source.swap(owned_source);
+  impl_->restarts.swap(restarts);
+  impl_->document = next;
+  impl_->stats = stats;
+  return next;
+}
+
+MarkdownDocument MarkdownParseSession::ApplyEdit(const MarkdownEdit& edit) {
+  const auto& source = impl_->source;
+  if (edit.start_byte > source.size() || edit.removed_bytes > source.size() - edit.start_byte)
+    throw std::out_of_range("Markdown edit is outside the source");
+  const auto boundary = [&](std::size_t offset) {
+    return offset == source.size() || (static_cast<unsigned char>(source[offset]) & 0xC0) != 0x80;
+  };
+  if (!boundary(edit.start_byte) || !boundary(edit.start_byte + edit.removed_bytes))
+    throw std::invalid_argument("Markdown edit splits a UTF-8 scalar");
+  ValidateUtf8(edit.inserted_text);
+  const auto remaining = source.size() - edit.removed_bytes;
+  const auto limit = std::min<std::size_t>(impl_->options.max_input_bytes, std::numeric_limits<MD_SIZE>::max());
+  if (edit.inserted_text.size() > limit - remaining) throw std::length_error("Markdown input limit exceeded");
+  auto next = source;
+  next.replace(edit.start_byte, edit.removed_bytes, edit.inserted_text);
+  return Update(next);
 }
 
 bool IsDefaultLinkAllowed(std::string_view target) noexcept {

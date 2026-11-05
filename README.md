@@ -15,6 +15,7 @@ CommonMark parser, configurable GFM extensions, and ordinary declarative views.
 - Native attributed text with Unicode-safe ranges and application-owned link activation
 - Selection/copy through `SelectionArea`, ambient light/dark themes, custom code/image renderers
 - Immutable documents that can be parsed on a worker and reused across recompositions
+- Stateful incremental parsing with UTF-8 edits, safe prefix reuse and parse statistics
 - Vendored MIT-licensed MD4C; no runtime download, WebView, JavaScript, or HTML rendering
 
 The component uses HuxerUI's platform-neutral views and supports its Windows,
@@ -78,6 +79,30 @@ auto document = ParseMarkdown(source, {
 return Markdown(document);
 ```
 
+## Incremental updates
+
+Keep one parser session for successive edits; publish its immutable snapshots to the UI:
+
+```cpp
+MarkdownParseSession parser;
+auto document = parser.Update(source);
+document = parser.ApplyEdit({.start_byte = parser.Source().size(),
+                             .inserted_text = "\nAppended paragraph.\n"});
+auto stats = parser.LastParseStats();
+// Or pass the entire revised source to parser.Update(next_source).
+```
+
+Edit coordinates are UTF-8 bytes at scalar boundaries, not HuxerUI UTF-16 offsets.
+The session reparses a tail from a parser-confirmed unchanged top-level boundary,
+reusing earlier blocks. Potential reference definitions or no safe boundary cause
+a full parse. Equal input preserves snapshot identity. Failures preserve the last
+successful source, document and statistics. Sessions are synchronous and require
+serialized access; snapshots can be retained independently.
+
+This reduces parser work for suitable edits; source scans and retained AST copies
+remain linear. It does not provide incremental rendering or virtualization. See
+[the parsing contract](docs/incremental-parsing.md) for boundaries and diagnostics.
+
 ## Themes and custom rendering
 
 The default appearance follows the enclosing HuxerUI theme, including font family,
@@ -129,7 +154,9 @@ to 8 MiB and nesting to 128; the nesting limit can be configured up to 512.
 
 The [standalone Markdown Playground](examples/preview/README.md) provides editable
 source beside a native preview, five switchable samples, light/dark themes, and
-custom code/image renderer examples. Click Render after editing. Narrow windows
+custom code/image renderer examples. Live preview is enabled with a cancellable
+120 ms debounce; pause it to render manually. Parse statistics show prefix reuse.
+Narrow windows
 stack the panels; the source panel can also be hidden.
 
 ```sh
@@ -182,8 +209,9 @@ enabling compilers or building MD4C. The library has no generated resource packa
 Task checkboxes are presentation only. Code blocks use wrapped monospace text by
 default; provide a renderer for highlighting or different scrolling. Table columns
 have a configurable fixed width, with per-cell wrapping and GFM alignment.
-Footnotes, math, diagrams, HTML execution, editing, streaming/incremental parsing,
-and document virtualization are outside this initial version.
+Footnotes, math, diagrams, HTML execution, a reusable editor component and document
+virtualization are outside this version. Stream chunks can be applied through the
+session, but there is no separate streaming grammar or finalization API.
 
 ## License
 
