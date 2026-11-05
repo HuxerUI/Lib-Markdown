@@ -1,6 +1,51 @@
+cmake_minimum_required(VERSION 3.20)
+
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    if(CMAKE_HOST_APPLE AND NOT CMAKE_SYSTEM_NAME AND NOT CMAKE_TOOLCHAIN_FILE
+            AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET AND "$ENV{MACOSX_DEPLOYMENT_TARGET}" STREQUAL "")
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS deployment target")
+    endif()
+    project(markdown_preview VERSION 0.1.0 LANGUAGES NONE)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/HuxerUIProject.cmake")
+    if(HUXERUI_PROJECT_PLAN_ONLY)
+        return()
+    endif()
+    # The preview registers the library itself; do not recursively add the preview.
+    set(HUXERUI_MARKDOWN_BUILD_EXAMPLES OFF)
+endif()
+
 huxerui_add_app(markdown_preview
-    SOURCES main.cpp
+    SOURCES src/app.cpp platform/desktop/main.cpp
     BUNDLE_NAME "HuxerUI Markdown"
     BUNDLE_IDENTIFIER "org.huxerui.markdown.preview")
-huxerui_use_library(markdown_preview TARGET HuxerUI::Markdown)
+if(TARGET HuxerUI::Markdown)
+    huxerui_use_library(markdown_preview TARGET HuxerUI::Markdown)
+else()
+    huxerui_use_library(markdown_preview TARGET HuxerUI::Markdown PATH "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+if(HUXERUI_LIBRARY_GRAPH_ONLY)
+    return()
+endif()
 target_compile_options(markdown_preview PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
+
+set(_preview_default_tests OFF)
+if(HUXERUI_MARKDOWN_BUILD_TESTS AND TARGET HuxerUI::testing)
+    set(_preview_default_tests ON)
+endif()
+option(HUXERUI_MARKDOWN_PREVIEW_BUILD_TESTS "Build preview interaction tests" ${_preview_default_tests})
+if(HUXERUI_MARKDOWN_PREVIEW_BUILD_TESTS)
+    if(NOT TARGET HuxerUI::testing)
+        message(FATAL_ERROR "Preview tests require HuxerUI::testing; enable HUXERUI_BUILD_TESTING_LIBRARY with a source checkout")
+    endif()
+    enable_testing()
+    add_executable(markdown_preview_tests tests/preview_test.cpp src/app.cpp)
+    add_dependencies(markdown_preview_tests markdown_preview)
+    target_link_libraries(markdown_preview_tests PRIVATE HuxerUI::Markdown HuxerUI::testing)
+    target_compile_options(markdown_preview_tests PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
+    if(APPLE)
+        set(_preview_test_resources "$<TARGET_BUNDLE_DIR:markdown_preview>/Contents/Resources/HuxerUI")
+    else()
+        set(_preview_test_resources "$<TARGET_FILE_DIR:markdown_preview>/markdown_preview.resources")
+    endif()
+    add_test(NAME markdown.preview COMMAND markdown_preview_tests "${_preview_test_resources}")
+endif()

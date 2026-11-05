@@ -25,6 +25,17 @@ jobs:
         run: ctest --test-dir build -C Release --output-on-failure
 
   native:
+    name: native (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: library
+            source: .
+            options: -DHUXERUI_MARKDOWN_BUILD_TESTS=ON
+          - name: preview
+            source: examples/preview
+            options: -DHUXERUI_MARKDOWN_PREVIEW_BUILD_TESTS=ON
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,9 +45,18 @@ jobs:
           repository: HuxerUI/HuxerUI
           ref: cadb1696cfa7b87d9d2d316b3ecba07b85a46962
           path: .cache/HuxerUI
-      - name: Configure native component and preview
-        run: cmake -S . -B build -DHUXERUI_HOME="${{ github.workspace }}/.cache/HuxerUI" -DHUXERUI_MARKDOWN_BUILD_TESTS=ON -DHUXERUI_BUILD_TESTING_LIBRARY=ON -DHUXERUI_MARKDOWN_BUILD_EXAMPLES=ON
+      - name: Configure ${{ matrix.name }} independently
+        run: cmake -S ${{ matrix.source }} -B build -DHUXERUI_HOME="${{ github.workspace }}/.cache/HuxerUI" -DHUXERUI_BUILD_TESTING_LIBRARY=ON ${{ matrix.options }}
       - name: Build
         run: cmake --build build --config Release --parallel 2
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+      - name: Upload Windows demo
+        if: matrix.name == 'preview'
+        uses: actions/upload-artifact@v4
+        with:
+          name: markdown-preview-windows
+          if-no-files-found: error
+          path: |
+            build/Release/markdown_preview.exe
+            build/Release/markdown_preview.resources/

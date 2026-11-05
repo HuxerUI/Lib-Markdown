@@ -100,6 +100,22 @@ attributes, but remain literal in code. Invalid UTF-8 is rejected; embedded NUL
 and invalid numeric entity scalars are replaced with U+FFFD. Defaults limit input
 to 8 MiB and nesting to 128; the nesting limit can be configured up to 512.
 
+## Interactive demo
+
+The [standalone Markdown Playground](examples/preview/README.md) provides editable
+source beside a native preview, five switchable samples, light/dark themes, and
+custom code/image renderer examples. Click Render after editing. Narrow windows
+stack the panels; the source panel can also be hidden.
+
+```sh
+cmake -S examples/preview -B build-preview -DHUXERUI_HOME=/path/to/HuxerUI
+cmake --build build-preview --config Release --parallel
+```
+
+With Visual Studio, launch `build-preview/Release/markdown_preview.exe`; keep its
+`markdown_preview.resources` directory alongside it. CI publishes a Windows demo
+artifact after its standalone build and interaction tests pass.
+
 ## Build and test
 
 Requires CMake 3.20+, a C99/C++20 toolchain, and a recent HuxerUI source tree or

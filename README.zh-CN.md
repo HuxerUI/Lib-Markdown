@@ -51,6 +51,19 @@ View Article() {
 任务复选框只读；表格使用固定列宽并支持横向滚动；默认代码块为可换行的等宽文本。
 当前版本不包含编辑器、增量解析、虚拟化、数学公式或 HTML 执行。
 
+## 交互 Demo
+
+[Markdown Playground](examples/preview/README.md) 提供源码编辑与渲染对照、五组样例、
+明暗主题、链接反馈和自定义代码/图片渲染。编辑后点击「渲染」，窄窗口自动上下排列。
+
+```sh
+cmake -S examples/preview -B build-preview -DHUXERUI_HOME=/path/to/HuxerUI
+cmake --build build-preview --config Release --parallel
+```
+
+Windows/Visual Studio 下运行 `build-preview/Release/markdown_preview.exe`，
+并保留旁边的 `markdown_preview.resources` 目录。CI 会提供 Windows demo artifact。
+
 ## 构建
 
 需要 CMake 3.20+、C99/C++20 编译器和带富文本接口的近期 HuxerUI SDK 或源码。
