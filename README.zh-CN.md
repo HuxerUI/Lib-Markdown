@@ -158,9 +158,9 @@ Windows/Visual Studio 下运行 `build-preview/Release/markdown_preview.exe`，
 并保留旁边的 `markdown_preview.resources` 目录。CI 会提供 Windows demo artifact。
 
 第二个 [Markdown Writer](examples/editor/README.md) 位于 `examples/editor`，是类 Typora
-体验的实验版：默认使用库的 `MarkdownEditor`，点击顶层段落/标题即可原位编辑，输入同步更新块内
-预览，失焦或 Ctrl+Enter 恢复排版。其他结构通过源码模式修改，源码工具栏复用 `ApplyMarkdownCommand`。
-尚无精确排版光标映射、统一撤销重做和自动保存；详见[块级编辑接口](docs/block-editing.md)。
+体验的实验版：默认使用库的 `MarkdownEditor`，直接编辑排版后的段落/标题，保持粗体、斜体等样式，
+编辑时隐藏 Markdown 标记。文字、光标和输入法共用原生富文本布局。其他结构通过源码模式修改。
+尚无跨块编辑、统一撤销重做和自动保存；详见[块级编辑接口](docs/block-editing.md)和[后续讨论记录](docs/editor-follow-up.md)。
 
 ```powershell
 cmake -S examples/editor -B build-editor -DHUXERUI_HOME=/path/to/HuxerUI
@@ -172,7 +172,8 @@ cmake --build build-editor --config Release --parallel
 
 ## 构建
 
-需要 CMake 3.20+、C99/C++20 编译器和带富文本接口的近期 HuxerUI SDK 或源码。
+需要 CMake 3.20+、C99/C++20 编译器和提供 `TextField::TextStyles` 的 HuxerUI SDK 或源码。
+已验证版本为 `e29c3c2573dcd7db201e7523ff59803529875d52`，位于 SDK 的 `feat/text-field-attributed-styles` 分支；CI 固定该提交。
 
 ```sh
 cmake -S . -B build -DHUXERUI_HOME=/path/to/HuxerUI \

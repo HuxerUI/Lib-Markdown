@@ -27,7 +27,8 @@ demo 的解析会话与流式会话使用相同的 `DemoParseOptions()`，显式
 库的默认解析仍关闭它们。Wiki 目标与脚注点击通过各自的类型化事件显示在状态栏，
 不打开网址、不自动滚动。脚注定义存在时解析器保守回退全量解析，底部统计会如实显示。
 「公式与空行」默认打开自定义渲染，显示标明用途的 LaTeX 源码卡片；关闭后显示默认等宽源码。
-完整公式排版不在该卡片中实现。编辑体验另在 [Writer demo](../editor/README.md) 开发。
+完整公式排版不在该卡片中实现。扩展样例中的 `||剧透||` 可独立点击揭示，复制仍包含正文。
+保持排版的直接编辑体验在 [Writer demo](../editor/README.md) 开发。
 
 demo 使用 0.2 API：State 保存 `MarkdownDocument` 值，通过
 `.On<MarkdownEvents::LinkActivated>()` 处理链接，使用 `code_block_renderer` 和

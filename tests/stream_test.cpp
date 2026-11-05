@@ -32,7 +32,7 @@ int main() { return Run([] {
     for (int variant = 0; variant < 3; ++variant) {
       ParseOptions options;
       if (variant == 1) options.soft_break_mode = SoftBreakMode::LineBreak;
-      if (variant == 2) { options.tables = false; options.autolinks = false; }
+      if (variant == 2) { options.tables = false; options.autolinks = {false, false, false}; }
       MarkdownStream stream(options);
       std::mt19937 random(42);
       for (std::size_t offset = 0; offset < source.size();) {

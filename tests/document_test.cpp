@@ -87,7 +87,7 @@ int main() { return Run([] {
   CHECK(ParseMarkdown("- [x] literal", {.task_lists = false}).PlainText() == "[x] literal");
   const auto no_tables = ParseMarkdown("a | b\n--- | ---\nx | y", {.tables = false});
   CHECK(no_tables.Root().children.front().kind != NodeKind::Table);
-  const auto no_auto = ParseMarkdown("https://example.com", {.autolinks = false});
+  const auto no_auto = ParseMarkdown("https://example.com", {.autolinks = {false, false, false}});
   CHECK(no_auto.Root().children.front().children.front().kind == NodeKind::Text);
 
   Throws<std::invalid_argument>([] { (void)ParseMarkdown("\xC0\xAF"); });

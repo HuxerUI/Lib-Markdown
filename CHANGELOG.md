@@ -49,7 +49,19 @@ Public API normalization; rebuild the library and applications together. See
   MarkdownEditor for virtualized paragraph/heading in-place source editing with
   synchronous local preview. Keep the active native client through IME and block
   splits, and preserve source outside the edited interval. Writer uses the editor.
-  Exact rendered caret mapping and unified cross-block undo remain future work.
+  Unified cross-block undo remains future work.
+- Add MarkdownRichText and direct attributed paragraph/heading editing with hidden
+  delimiters, retained inline marks, UTF-16 display/source coordinates, composition
+  cancellation and bounded recent formatting restoration for native text undo.
+  Verify generated Markdown with MD4C, keep neighbouring source bytes unchanged,
+  and restore accepted content when a native proposal cannot be serialized.
+- Require HuxerUI TextField::TextStyles; publish the SDK change on its own feature
+  branch and pin verified commit e29c3c2573dcd7db201e7523ff59803529875d52 in CI.
+- Add opt-in Spoiler AST/native click-to-reveal spans, granular URL/email/WWW
+  autolink options, CommonMark/GitHub syntax presets, permissive ATX headings,
+  optional indented code and ordinary whitespace normalization. Keep vendored MD4C
+  unchanged and handle its tab-collapse defect in the adapter.
+- Document rich editing boundaries and nonblocking follow-up decisions.
 
 No release tag has been created. Default syntax remains unchanged; new extensions
 are explicitly enabled. Demo parsing enables the optional extensions.

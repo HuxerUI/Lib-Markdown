@@ -15,7 +15,7 @@ enum class NodeKind {
   ThematicBreak, CodeBlock, Table, TableHead, TableBody, TableRow, TableHeaderCell,
   TableCell, Admonition, FootnoteSection, FootnoteDefinition, BlankLines,
   Emphasis, Strong, Strikethrough, Underline, Highlight, Insertion, Code, Link,
-  WikiLink, FootnoteReference, InlineMath, DisplayMath, Image, Text,
+  WikiLink, FootnoteReference, InlineMath, DisplayMath, Spoiler, Image, Text,
 };
 
 enum class AdmonitionKind { Note, Tip, Important, Warning, Caution };
@@ -76,12 +76,21 @@ struct MarkdownSourceRange {
   bool operator==(const MarkdownSourceRange&) const = default;
 };
 
+/// Bare-text autolinks only; explicit Markdown links and <angle autolinks> are
+/// parsed independently. Defaults preserve the library's previous behavior.
+struct MarkdownAutolinkOptions {
+  bool urls = true;
+  bool emails = true;
+  bool www = true;
+  bool operator==(const MarkdownAutolinkOptions&) const = default;
+};
+
 /// Synchronous parse configuration. No UI configuration or thread scheduling.
 struct ParseOptions {
   bool tables = true;
   bool strikethrough = true;
   bool task_lists = true;
-  bool autolinks = true;
+  MarkdownAutolinkOptions autolinks;
   /// Optional MD4C extensions, disabled by default. No third-party flags leak into this API.
   bool highlight = false; ///< ==highlight==
   bool insertions = false; ///< ++inserted++ (displayed with underline)
@@ -97,6 +106,10 @@ struct ParseOptions {
   /// Collect conservative, verified ranges for editable root paragraphs/headings.
   /// Adds fragment parsing work; unavailable/ambiguous blocks have no range.
   bool source_ranges = false;
+  bool spoilers = false; ///< ||hidden text||; visual concealment, not data protection.
+  bool collapse_whitespace = false; ///< Collapse nontrivial ordinary whitespace; code remains literal.
+  bool permissive_atx_headings = false; ///< Accept #heading without a separating space.
+  bool indented_code_blocks = true; ///< False keeps fenced code but treats indentation as paragraph content.
   /// Does not change explicit hard breaks or newlines inside code blocks/spans.
   SoftBreakMode soft_break_mode = SoftBreakMode::Space;
   /// Positive UTF-8 input-byte limit, default 8 MiB; exceeding it throws length_error.
@@ -104,6 +117,11 @@ struct ParseOptions {
   /// Positive nesting limit, default 128, maximum 512; exceeded depth throws length_error.
   std::size_t max_nesting = 128;
   bool operator==(const ParseOptions&) const = default;
+  /// Syntax presets; raw HTML remains literal in both. Individual fields remain
+  /// editable. CommonMark disables optional GFM/bare autolinks; GitHub enables
+  /// MD4C's GitHub dialect including admonitions and footnotes.
+  [[nodiscard]] static ParseOptions CommonMark();
+  [[nodiscard]] static ParseOptions GitHub();
 };
 
 /// Immutable, cheaply copied document snapshot. Copies share storage; equality compares

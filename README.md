@@ -20,6 +20,8 @@ CommonMark parser, configurable GFM extensions, and ordinary declarative views.
 - Stateful incremental parsing with UTF-8 edits, safe prefix reuse and parse statistics
 - Arbitrary-byte UTF-8 streaming and optional measured top-level block virtualization
 - Verified source ranges, block edit sessions and a virtualized native MarkdownEditor
+- Direct editing of attributed paragraph/heading text, preserving inline formatting and native IME geometry
+- Click-to-reveal spoilers, separate URL/email/WWW autolinks and explicit syntax presets
 - Vendored MIT-licensed MD4C; no runtime download, WebView, JavaScript, or HTML rendering
 
 The component uses HuxerUI's platform-neutral views and supports its Windows,
@@ -252,12 +254,13 @@ With Visual Studio, launch `build-preview/Release/markdown_preview.exe`; keep it
 artifact after its standalone build and interaction tests pass.
 
 The separate [Markdown Writer](examples/editor/README.md) is the experimental
-Typora-inspired editing demo. Click a root paragraph/heading to edit its source in
-place with immediate block-local preview; blur or Ctrl+Enter restores formatting.
-The library's `MarkdownEditor` retains the active native input through syntax
-changes and IME composition. Full-source mode and its formatting toolbar remain
-available for other structures. This is an initial block editor; exact rendered
-caret mapping and shared undo history remain future work. See [block editing](docs/block-editing.md).
+Typora-inspired editing demo. Supported paragraphs/headings edit directly in their
+existing typography, with hidden Markdown markers and no duplicate preview.
+The native attributed paragraph owns drawing, caret, selection and IME geometry.
+Inline formatting is retained while source is regenerated within the edited block.
+Unsupported inline content uses in-place source editing; full-source mode remains
+available for other structures. Cross-block editing and shared history remain
+future work. See [block editing](docs/block-editing.md) and [remaining decisions](docs/editor-follow-up.md).
 
 ```sh
 cmake -S examples/editor -B build-editor -DHUXERUI_HOME=/path/to/HuxerUI
@@ -270,9 +273,10 @@ resource directory. A root build with examples enabled builds both demos.
 ## Build and test
 
 Requires CMake 3.20+, a C99/C++20 toolchain, and a recent HuxerUI source tree or
-SDK with `AttributedText`, `TextEvents::LinkActivated`, and `SelectionArea`.
-The initial implementation was verified with HuxerUI commit
-`cadb1696cfa7b87d9d2d316b3ecba07b85a46962`.
+SDK with `TextField::TextStyles`, `AttributedText`, and `SelectionArea`.
+The verified HuxerUI revision is `e29c3c2573dcd7db201e7523ff59803529875d52`,
+currently on [feat/text-field-attributed-styles](https://github.com/HuxerUI/HuxerUI/tree/feat/text-field-attributed-styles).
+That dependency change is published separately; CI pins the exact commit.
 
 ```sh
 cmake -S . -B build -DHUXERUI_HOME=/path/to/HuxerUI \

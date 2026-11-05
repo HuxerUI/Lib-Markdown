@@ -77,7 +77,7 @@ struct ParseOptions {
   bool tables = true;
   bool strikethrough = true;
   bool task_lists = true;
-  bool autolinks = true;
+  MarkdownAutolinkOptions autolinks; // urls/emails/www default true
   SoftBreakMode soft_break_mode = SoftBreakMode::Space;
   std::size_t max_input_bytes = 8 * 1024 * 1024;
   std::size_t max_nesting = 128;

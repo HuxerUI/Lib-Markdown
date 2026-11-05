@@ -22,17 +22,37 @@ struct InlineBuilder {
   std::vector<TextLinkRange> links;
   std::vector<detail::OriginalLink> originals;
   TextOffset length = 0;
+  const std::set<unsigned>* revealed_spoilers = nullptr;
+  unsigned spoiler_index = 0;
+  unsigned concealed_depth = 0;
 
   void Append(const std::string& value, const TextSpanStyle& style) {
     if (value.empty()) return;
     const auto begin = length;
     length += AttributedText(value).Length();
     text += value;
-    styles.push_back({{begin, length}, style});
+    auto resolved = style;
+    if (concealed_depth) resolved.foreground = resolved.background = theme.spoiler_cover;
+    styles.push_back({{begin, length}, resolved});
   }
 
   void Visit(const MarkdownNode& node, TextSpanStyle style = {}) {
     switch (node.kind) {
+    case NodeKind::Spoiler: {
+      const auto index = ++spoiler_index;
+      const auto begin = length;
+      const bool concealed = !revealed_spoilers || !revealed_spoilers->contains(index);
+      const bool outer = concealed_depth == 0;
+      if (concealed) ++concealed_depth;
+      Append(node.text, style);
+      for (const auto& child : node.children) Visit(child, style);
+      if (concealed) --concealed_depth;
+      if (concealed && outer && length > begin) {
+        links.push_back({{begin, length}, Uri("huxerui-markdown:spoiler-" + std::to_string(index))});
+        originals.push_back({.range = {begin, length}, .kind = NodeKind::Spoiler, .spoiler_index = index});
+      }
+      return;
+    }
     case NodeKind::Strong: style.font_weight = FontWeight::Bold; break;
     case NodeKind::Emphasis: style.font_slant = FontSlant::Italic; break;
     case NodeKind::Strikethrough:
@@ -60,8 +80,8 @@ struct InlineBuilder {
     case NodeKind::WikiLink:
     case NodeKind::FootnoteReference:
     case NodeKind::Link: {
-      const bool allowed = node.kind != NodeKind::Link ||
-          (policy ? policy(node.destination) : IsDefaultLinkAllowed(node.destination));
+      const bool allowed = !concealed_depth && (node.kind != NodeKind::Link ||
+          (policy ? policy(node.destination) : IsDefaultLinkAllowed(node.destination)));
       const auto begin = length;
       if (allowed) {
         style.foreground = theme.link;
@@ -122,6 +142,10 @@ bool HasBlankLines(const MarkdownNode& node) {
   return std::any_of(node.children.begin(), node.children.end(), HasBlankLines);
 }
 
+bool HasSpoilers(const MarkdownNode& node) {
+  return node.kind == NodeKind::Spoiler || std::any_of(node.children.begin(), node.children.end(), HasSpoilers);
+}
+
 class Renderer {
 public:
   Renderer(const MarkdownOptions& options, MarkdownStyle theme, EventEmitter events,
@@ -143,6 +167,35 @@ private:
   }
 
   View Paragraph(const MarkdownNode& node, TextStyle style, TextAlign alignment = TextAlign::Leading) const {
+    if (HasSpoilers(node)) {
+      const auto selection_id = selection_ ? std::optional<TextBlockId>{selection_->at(&node)} : std::nullopt;
+      return Scope([owned = node, style, alignment, theme = theme_, policy = options_.link_policy,
+                    events = events_, interactive = interactive_, selection_id]() -> View {
+        auto revealed = UseState(std::set<unsigned>{});
+        auto previous = UseState(owned);
+        if (previous.Get() != owned) { previous = owned; revealed = std::set<unsigned>{}; }
+        auto content = detail::BuildInline(owned, theme, policy, &revealed.Get());
+        auto attributed = content.text;
+        if (!interactive) {
+          const auto ranges = attributed.StyleRanges();
+          attributed = AttributedText::FromRanges(attributed.PlainText(), {ranges.begin(), ranges.end()});
+        }
+        auto text = Text(std::move(attributed)).Style(style).Align(alignment);
+        if (selection_id) text = std::move(text).SelectionBlock(*selection_id);
+        return std::move(text).On<TextEvents::LinkActivated>([revealed, events, links = std::move(content.links)](const TextLinkActivation& event) mutable {
+          for (const auto& link : links) {
+            if (link.range != event.range) continue;
+            if (link.kind == NodeKind::Spoiler) {
+              auto next = revealed.Get(); next.insert(link.spoiler_index); revealed = std::move(next);
+            } else if (link.kind == NodeKind::WikiLink) events.Emit<MarkdownEvents::WikiLinkActivated>(MarkdownWikiLinkActivation{link.destination});
+            else if (link.kind == NodeKind::FootnoteReference)
+              events.Emit<MarkdownEvents::FootnoteActivated>(MarkdownFootnoteActivation{link.footnote_number, link.footnote_label, link.footnote_reference});
+            else events.Emit<MarkdownEvents::LinkActivated>(MarkdownLinkActivation{link.destination});
+            return;
+          }
+        });
+      });
+    }
     auto inline_text = detail::BuildInline(node, theme_, options_.link_policy);
     if (!interactive_) {
       const auto styles = inline_text.text.StyleRanges();
@@ -412,10 +465,34 @@ struct BlockEditorState {
   VirtualState layout;
   MarkdownDocument fragment;
   std::string fragment_text;
+  std::optional<MarkdownRichText> rich;
+  bool rich_text;
   std::uint64_t focus_epoch = 0;
   bool empty_mode;
-  explicit BlockEditorState(const TextEditingValue& value, ParseOptions options)
-      : parse_options(options), session(value.text, options), empty_mode(EmptyForEditing(session.Document())) {}
+  explicit BlockEditorState(const TextEditingValue& value, ParseOptions options, bool rich_enabled)
+      : parse_options(options), session(value.text, options), rich_text(rich_enabled), empty_mode(EmptyForEditing(session.Document())) {}
+
+  void EndEdit() {
+    if (rich && rich->Value().composition) throw std::logic_error("Finish IME composition before ending rich text editing");
+    session.EndEdit();
+    rich.reset();
+  }
+
+  void UpdateEdit(const TextEditingValue& value) {
+    if (!rich) { session.UpdateEdit(value); return; }
+    auto candidate = *rich;
+    candidate.Update(value);
+    if (value.text != rich->Value().text || value.composition != rich->Value().composition)
+      session.UpdateEdit(candidate.SourceValue());
+    else {
+      try {
+        const auto mapped = candidate.SourceValue();
+        if (mapped.text == session.EditingValue().text) session.UpdateEdit(mapped);
+      } catch (const std::invalid_argument&) { /* Selection alone never normalizes source. */ }
+        catch (const std::length_error&) { /* Canonical spelling can exceed a tight source limit. */ }
+    }
+    rich = std::move(candidate);
+  }
 
   bool Activate(MarkdownDocument layout_document, std::size_t index) {
     if (session.LayoutDocument() != layout_document) return false; // Stale realized row.
@@ -427,12 +504,15 @@ struct BlockEditorState {
       const auto old = *layout_document.TopLevelSourceRange(*active);
       if (start >= old.end_byte)
         start = start - (old.end_byte - old.start_byte) + session.EditingValue().text.size();
-      session.EndEdit();
+      EndEdit();
     }
     for (std::size_t i = 0; i < session.Document().Root().children.size(); ++i) {
       const auto candidate = session.Document().TopLevelSourceRange(i);
       if (candidate && candidate->start_byte == start) {
         session.BeginEdit(i);
+        const auto& node = session.Document().Root().children[i];
+        rich.reset();
+        if (rich_text && MarkdownRichText::Supports(node)) rich.emplace(node, parse_options);
         ++focus_epoch;
         return true;
       }
@@ -453,12 +533,39 @@ struct BlockEditorState {
   }
 };
 
+std::vector<TextStyleRange> RichStyles(const MarkdownRichText& rich, const MarkdownNode& node, const MarkdownStyle& theme) {
+  auto base = theme.body;
+  if (node.kind == NodeKind::Heading)
+    base.font = base.font.WithSize(theme.heading_sizes[std::clamp(node.heading_level, 1U, 6U) - 1]).WithWeight(FontWeight::Bold);
+  std::vector<TextStyleRange> result;
+  for (const auto& run : rich.Runs()) {
+    TextSpanStyle style{.font = base.font, .foreground = base.foreground};
+    for (const auto& mark : run.marks) {
+      switch (mark.kind) {
+      case NodeKind::Strong: style.font_weight = FontWeight::Bold; break;
+      case NodeKind::Emphasis: style.font_slant = FontSlant::Italic; break;
+      case NodeKind::Strikethrough: style.decoration = style.decoration.value_or(TextDecoration::None) | TextDecoration::StrikeThrough; break;
+      case NodeKind::Underline: case NodeKind::Insertion:
+        style.decoration = style.decoration.value_or(TextDecoration::None) | TextDecoration::Underline; break;
+      case NodeKind::Highlight: style.foreground = theme.highlight_foreground; style.background = theme.highlight_background; break;
+      case NodeKind::Code: style.font = theme.code.font; style.foreground = theme.code.foreground; style.background = theme.code_background; break;
+      case NodeKind::Link: case NodeKind::WikiLink:
+        style.foreground = theme.link; style.decoration = style.decoration.value_or(TextDecoration::None) | TextDecoration::Underline; break;
+      default: break;
+      }
+    }
+    result.push_back({run.range, style});
+  }
+  return result;
+}
+
 } // namespace
 
 namespace detail {
 InlineResult BuildInline(const MarkdownNode& node, const MarkdownStyle& theme,
-                         const MarkdownLinkPolicy& policy) {
+                         const MarkdownLinkPolicy& policy, const std::set<unsigned>* revealed_spoilers) {
   InlineBuilder builder{theme, policy, {}, {}, {}, {}, 0};
+  builder.revealed_spoilers = revealed_spoilers;
   builder.Visit(node);
   return {AttributedText::FromRanges(std::move(builder.text), std::move(builder.styles), std::move(builder.links)),
           std::move(builder.originals)};
@@ -477,6 +584,7 @@ MarkdownStyle MarkdownStyle::FromTheme(const ThemeSpec& theme) {
   result.border = theme.colors.outline;
   result.highlight_foreground = theme.colors.on_primary_container;
   result.highlight_background = theme.colors.primary_container;
+  result.spoiler_cover = theme.colors.on_surface_variant;
   result.admonition_foreground = theme.colors.primary;
   result.admonition_background = theme.colors.surface_container;
   result.blank_line_height = theme.typography.body_large * 1.25F;
@@ -568,10 +676,10 @@ View MarkdownEditor(TextEditingValue value, MarkdownEditorOptions options) {
   return Scope([value = std::move(value), options = std::move(options)]() -> View {
     const auto& virtualization = options.virtualization;
     auto holder = UseState(std::shared_ptr<BlockEditorState>{});
-    if (!holder.Get() || holder.Get()->parse_options != options.parse_options) {
+    if (!holder.Get() || holder.Get()->parse_options != options.parse_options || holder.Get()->rich_text != options.rich_text) {
       if (holder.Get() && holder.Get()->session.EditingValue().composition)
         throw std::logic_error("Finish IME composition before changing Markdown editor parsing options");
-      holder = std::make_shared<BlockEditorState>(value, options.parse_options);
+      holder = std::make_shared<BlockEditorState>(value, options.parse_options, options.rich_text);
     }
     const auto state = holder.Get();
     auto revision = UseState(std::uint64_t{0});
@@ -580,6 +688,7 @@ View MarkdownEditor(TextEditingValue value, MarkdownEditorOptions options) {
     const auto tasks = UseTaskScope();
     if (state->session.Source() != value.text) {
       state->session.UpdateSource(value.text);
+      state->rich.reset();
       ++state->focus_epoch;
     }
     auto theme = options.markdown_options.style ? *options.markdown_options.style : MarkdownStyle::FromTheme(UseTheme());
@@ -621,13 +730,19 @@ View MarkdownEditor(TextEditingValue value, MarkdownEditorOptions options) {
         (void)revision.Get();
         const auto range = layout_document.TopLevelSourceRange(index);
         if (!range) return Renderer(render_options, theme, events).RenderBlock(block->node);
+        auto input_generation = UseState(std::uint64_t{0});
+        const auto generation = input_generation.Get();
         const bool active = state->session.LayoutDocument() == layout_document && state->session.EditingBlock() == index;
         auto local = active ? state->session.EditingValue() : TextEditingValue::FromText(std::string(
             state->session.LayoutSource().substr(range->start_byte, range->end_byte - range->start_byte)));
+        std::optional<MarkdownRichText> projection;
+        if (options.rich_text && MarkdownRichText::Supports(block->node))
+          projection = active && state->rich ? *state->rich : MarkdownRichText(block->node, options.parse_options);
+        if (projection) local = projection->Value();
         // Keep link hit targets out of editable rendered overlays: clicking any
         // glyph enters the backing field instead of navigating.
         View preview = Renderer(render_options, theme, events, nullptr, false).RenderBlock(block->node);
-        if (active) {
+        if (active && !projection) {
           if (options.live_preview) {
             auto fragment_options = options.parse_options;
             fragment_options.source_ranges = false;
@@ -642,14 +757,31 @@ View MarkdownEditor(TextEditingValue value, MarkdownEditorOptions options) {
         auto input = TextField(local).Variant(TextFieldVariant::Standard)
             .LineLimits(TextFieldLineLimits::MultiLine(1)).VerticalAlign(TextVerticalAlign::Top)
             .OnChanged([=](const TextEditingValue& next) mutable {
+              if (input_generation.Get() != generation) return;
               try {
                 if (!state->Activate(layout_document, index)) return;
-                state->session.UpdateEdit(next);
+                state->UpdateEdit(next);
                 const auto whole = state->WholeValue();
                 events.Emit<MarkdownEditorEvents::Changed>(whole);
-              } catch (const std::exception& error) { report(error); }
+              } catch (const std::exception& error) {
+                // A rejected controlled proposal may still live in TextField's
+                // native client. Retire that client rather than displaying text
+                // which was never accepted into the document.
+                input_generation = generation + 1;
+                if (state->session.EditingBlock()) {
+                  if (state->rich) {
+                    auto accepted = state->rich->Value(); accepted.composition.reset(); state->rich->Update(accepted);
+                  }
+                  auto accepted = state->session.EditingValue(); accepted.composition.reset();
+                  state->session.UpdateEdit(accepted);
+                  const auto whole = state->WholeValue(); events.Emit<MarkdownEditorEvents::Changed>(whole);
+                  state->EndEdit(); ++state->focus_epoch;
+                }
+                report(error);
+              }
               revision = revision.Get() + 1;
             }).On<ViewEvents::FocusChanged>([=](bool focused) mutable {
+              if (input_generation.Get() != generation) return;
               try {
                 if (focused) {
                   (void)state->Activate(layout_document, index);
@@ -659,7 +791,7 @@ View MarkdownEditor(TextEditingValue value, MarkdownEditorOptions options) {
                   // Defer closure so focus can first enter another backing field.
                   tasks.Post([=]() mutable {
                     if (state->focus_epoch != epoch || !state->session.EditingBlock() || state->session.EditingValue().composition) return;
-                    try { state->session.EndEdit(); ++state->focus_epoch; revision = revision.Get() + 1; }
+                    try { state->EndEdit(); ++state->focus_epoch; revision = revision.Get() + 1; }
                     catch (const std::exception& error) { report(error); }
                   });
                 }
@@ -667,11 +799,25 @@ View MarkdownEditor(TextEditingValue value, MarkdownEditorOptions options) {
             }).On<ViewEvents::KeyIntercept>([=](const KeyEvent& event) mutable {
               if (event.type != KeyEventType::Down || event.key != Key::Enter || !event.modifiers.control ||
                   state->session.EditingValue().composition) return false;
-              try { state->session.EndEdit(); ++state->focus_epoch; revision = revision.Get() + 1; }
+              try { state->EndEdit(); ++state->focus_epoch; revision = revision.Get() + 1; }
               catch (const std::exception& error) { report(error); }
               return true;
-            }).With(Opacity(active ? 1.0F : 0.0F)).Key("markdown-block-input");
-        return EditableBlockLayout{std::move(input), std::move(preview)}
+            }).With(Opacity(active || projection ? 1.0F : 0.0F)).Key("markdown-block-input");
+        if (projection) {
+          input = std::move(input).TextStyles(RichStyles(*projection, block->node, theme))
+              .With(FontSize(block->node.kind == NodeKind::Heading ? theme.heading_sizes[std::clamp(block->node.heading_level, 1U, 6U) - 1] : theme.body.font.Size()));
+          auto field_style = TextFieldStyle::Default();
+          field_style.padding = {};
+          field_style.standard.minimum_height = 0;
+          field_style.border_width = field_style.focused_border_width = 0;
+          field_style.show_label = false;
+          field_style.caret = theme.link;
+          field_style.composition = theme.link;
+          ThemeDefinition field_theme;
+          field_theme.Set(field_style);
+          return Theme(std::move(field_theme), Scope([input = View(std::move(input))] { return input; }).Key(generation));
+        }
+        return EditableBlockLayout{Scope([input = View(std::move(input))] { return input; }).Key(generation), std::move(preview)}
             .LayoutValue<EditingPresentation>(active).With(Spacing(active && options.live_preview ? 8.0F : 0.0F));
       }).With(Frame{.min_height = 0.001F}, Padding(EdgeInsets{0, 0, index + 1 < snapshot->blocks.size() ?
           BlockGap(block->node, snapshot->blocks[index + 1]->node, theme.block_spacing) : 0, 0})).Key(block->id);

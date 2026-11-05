@@ -88,4 +88,12 @@ View BlockEditor() {
   return MarkdownEditor(value, {.parse_options = {.math = true}, .live_preview = true})
       .On<MarkdownEditorEvents::Changed>([value](const TextEditingValue& next) mutable { value = next; });
 }
+
+MarkdownDocument ConfiguredSyntax(std::string_view source) {
+  auto options = ParseOptions::GitHub();
+  options.spoilers = true;
+  options.autolinks = {.urls = true, .emails = false, .www = false};
+  options.indented_code_blocks = false;
+  return ParseMarkdown(source, options);
+}
 } // namespace markdown_examples

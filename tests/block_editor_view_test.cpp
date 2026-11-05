@@ -16,7 +16,7 @@ View EditorRoot() {
       MaterialTheme(MaterialLightThemeSpec(), Column{
         Button("outside").Key("outside"),
         MarkdownEditor(source, {.parse_options = {.wiki_links = true, .preserve_blank_lines = true},
-            .virtualization = {.cache_extent = 100, .scroll_controller = scroll}})
+            .virtualization = {.cache_extent = 100, .scroll_controller = scroll}, .rich_text = false})
             .On<MarkdownEditorEvents::Changed>([](const TextEditingValue& next) { source = next; })
             .On<MarkdownEditorEvents::Error>([](const std::string& message) { error = message; })
             .With(Grow{}).Key("editor"),

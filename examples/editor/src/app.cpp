@@ -10,11 +10,11 @@ using namespace huxerui::markdown;
 
 const std::string initial_source = R"md(# 开始写作
 
-这是类 Typora 编辑体验的开发 demo。点击段落或标题即可原位编辑，输入时会实时显示排版预览。
+这是类 Typora 编辑体验的开发 demo。直接点击排版后的文字编辑，标题、粗体、斜体在输入时保持样式。
 
 ## 试一试
 
-点击这一段试着输入 **粗体**、*斜体* 或 `代码`，点击其他位置或按 Ctrl+Enter 完成编辑。
+点击这一段，在 **粗体**、*斜体* 或 `代码` 中修改文字，点击其他位置或按 Ctrl+Enter 完成编辑。
 
 - 完整保存 TextEditingValue 的选区与输入法状态
 - 连续输入时每 120 ms 合并更新预览
@@ -28,7 +28,7 @@ const std::string initial_source = R"md(# 开始写作
 
 ParseOptions WriterOptions() {
   return {.highlight = true, .insertions = true, .underline = true, .wiki_links = true,
-          .admonitions = true, .footnotes = true, .math = true, .preserve_blank_lines = true};
+          .admonitions = true, .footnotes = true, .math = true, .preserve_blank_lines = true, .spoilers = true};
 }
 
 struct WriterSession {
@@ -158,10 +158,10 @@ View App() {
         }).Key("mode-toggle"),
         Button(dark.Get() ? "浅色" : "深色").OnClick([dark]() mutable { dark = !dark.Get(); }).Key("writer-theme"),
       }.With(Spacing(12.0F)),
-      Text("类 Typora 开发 demo · 段落/标题原位编辑 · 点击离开或 Ctrl+Enter 完成")
+      Text("类 Typora 开发 demo · 保持排版直接编辑 · 点击离开或 Ctrl+Enter 完成")
           .With(Foreground{theme.colors.on_surface_variant}),
       Flow(std::move(toolbar)).With(Spacing(8.0F)),
-      Checkbox("显示实时预览", preview.Get()).OnChanged([preview](bool enabled) mutable { preview = enabled; }).Key("writer-preview-toggle"),
+      Checkbox("源码实时预览", preview.Get()).OnChanged([preview](bool enabled) mutable { preview = enabled; }).Key("writer-preview-toggle"),
       std::move(body).With(Grow{}, Padding(16.0F), Background{theme.colors.surface}, Border{theme.colors.outline, 0.5F}),
       Text(status).With(Foreground{theme.colors.on_surface_variant}).Key("writer-status"),
     }.With(Padding(compact ? 12.0F : 24.0F), Spacing(12.0F), CrossAlign(CrossAxisAlignment::Stretch), Background{theme.colors.background});

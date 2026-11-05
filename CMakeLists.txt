@@ -15,7 +15,7 @@ endif()
 
 set(_markdown_sources src/document.cpp third_party/md4c/md4c.c third_party/md4c/entity.c)
 if(HUXERUI_MARKDOWN_BUILD_VIEW)
-    huxerui_add_library(huxerui_markdown SOURCES src/markdown.cpp src/editing.cpp ${_markdown_sources})
+    huxerui_add_library(huxerui_markdown SOURCES src/markdown.cpp src/editing.cpp src/rich_text.cpp ${_markdown_sources})
 else()
     add_library(huxerui_markdown STATIC ${_markdown_sources})
 endif()

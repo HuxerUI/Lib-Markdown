@@ -23,13 +23,14 @@ int main(int argc, char** argv) { return Run([&] {
   CHECK(argc == 2);
   UiTest ui(application, {.viewport = {1180, 820}, .resource_provider = std::make_shared<WriterResources>(argv[1])});
   const auto advance = [&](int ms) { ui.Pump(std::chrono::milliseconds(ms)); ui.Pump(); };
-  CHECK(ui.Find(UiSelector::Text("开始写作")).Exists());
+  CHECK(ui.Find(UiSelector::Value("开始写作")).Exists());
   CHECK(!ui.Find(UiSelector::Key("writer-source")).Exists());
-  ui.Find(UiSelector::Text("开始写作")).Tap();
+  ui.Find(UiSelector::Value("开始写作")).Tap();
   auto block = ui.Find(UiSelector::AllOf(UiSelector::Key("markdown-block-input"), UiSelector::Focused(true)));
-  CHECK(block.One().value == "# 开始写作");
-  block.ReplaceText("# 原位输入😀");
-  CHECK(ui.Find(UiSelector::Key("markdown-block-preview")).Find(UiSelector::Text("原位输入😀")).Exists());
+  CHECK(block.One().value == "开始写作");
+  block.ReplaceText("原位输入😀");
+  CHECK(block.One().value == "原位输入😀");
+  CHECK(!ui.Find(UiSelector::Key("markdown-block-preview")).Exists());
   ui.Find(UiSelector::Key("mode-toggle")).Tap();
   auto source = ui.Find(UiSelector::Key("writer-source"));
   CHECK(source.One().value->starts_with("# 原位输入😀\n"));
@@ -44,9 +45,9 @@ int main(int argc, char** argv) { return Run([&] {
   CHECK(ui.Find(UiSelector::Key("writer-preview")).Find(UiSelector::Text("中文😀")).Exists());
   ui.Find(UiSelector::Key("mode-toggle")).Tap();
   CHECK(!source.Exists());
-  CHECK(ui.Find(UiSelector::Text("中文😀")).Exists());
+  CHECK(ui.Find(UiSelector::Value("中文😀")).Exists());
   ui.Find(UiSelector::Key("writer-theme")).Tap();
-  CHECK(ui.Find(UiSelector::Text("中文😀")).Exists());
+  CHECK(ui.Find(UiSelector::Value("中文😀")).Exists());
   ui.Find(UiSelector::Key("mode-toggle")).Tap();
   CHECK(source.One().value == "**中文😀**");
   source.Tap();
@@ -60,7 +61,7 @@ int main(int argc, char** argv) { return Run([&] {
   }
   source.ReplaceText("# 切换时立即更新\n");
   ui.Find(UiSelector::Key("mode-toggle")).Tap(); // Flush queued input immediately.
-  CHECK(ui.Find(UiSelector::Text("切换时立即更新")).Exists());
+  CHECK(ui.Find(UiSelector::Value("切换时立即更新")).Exists());
   advance(200);
   CHECK(!ui.Find(UiSelector::Text("持续输入")).Exists());
   ui.Find(UiSelector::Key("mode-toggle")).Tap();

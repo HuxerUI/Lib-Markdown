@@ -29,7 +29,7 @@ ParseOptions 仅配置解析；MarkdownOptions/MarkdownStyle 仅配置显示，�
 | admonitions | MD_FLAG_ADMONITIONS | Admonition；Note/Tip/Important/Warning/Caution 容器 |
 | footnotes | MD_FLAG_FOOTNOTES | FootnoteReference、FootnoteSection、FootnoteDefinition |
 
-六项默认均为 false；原有 tables/strikethrough/task_lists/autolinks 保持 true。
+六项默认均为 false；原有 tables/strikethrough/task_lists 保持 true，自动链接的 URL/email/WWW 三类默认均开启。
 MD4C 原生优先级决定语法嵌套、转义、围栏内字面内容和格式组合，不用字符串正则替换标记。
 启用 underline 后，请用 `*` 和 `**` 输入斜体与粗体。
 
@@ -46,7 +46,33 @@ auto document = session.Update(source);
 默认解析不启用这些扩展。示例程序的 DemoParseOptions 显式开启六项及后续新增的 math/空行选项；这不是库的隐式方言切换。
 HTML 仍按字面文字显示，不启用 MD4C HTML 输出，不接入网络下载。
 
-## 显示与交互
+## 后续接入的解析选项
+
+```cpp
+auto parse = ParseOptions::GitHub(); // tables/strike/task/autolinks/admonitions/footnotes
+parse.spoilers = true;
+parse.autolinks = {.urls = true, .emails = false, .www = false};
+parse.permissive_atx_headings = true;
+parse.indented_code_blocks = false;
+parse.collapse_whitespace = true;
+```
+
+`ParseOptions::CommonMark()` 关闭 GFM 扩展和裸文本自动链接；两种预设的 HTML 均按字面显示。
+预设只是普通 ParseOptions 值，可以继续逐项修改。默认构造仍维持原来的基础 GFM 行为，
+不会隐式开启 GitHub 预设中的提示块和脚注。
+
+`MarkdownAutolinkOptions` 分别控制裸 URL、email 和 WWW；不影响显式链接或 `<https://...>`。
+这是开发阶段的破坏性 API 更新，旧 `.autolinks = false` 改为 `{false, false, false}`。
+宽松标题接受 `#heading`；禁用缩进代码后围栏代码仍工作；普通空白折叠保留代码、公式和实体。
+当前 MD4C 的 COLLAPSEWHITESPACE 标记存在制表符分隔丢失，故由适配层折叠普通文本，
+第三方源码未改动。默认三个选项均不改变原语法行为。
+
+`spoilers=true` 识别 `||text||` 并生成 Spoiler 节点。普通/虚拟视图使用 `MarkdownStyle::spoiler_cover`
+遮盖，点击、键盘链接激活或辅助功能 Activate 可独立揭示；揭示后内部链接恢复正常事件。
+揭示状态保存在挂载段落中，内容变化或卸载后重置。复制和辅助功能仍可读取正文；这是视觉隐藏。
+包含剧透的 Writer 段落暂使用源码回退，普通 Playground 的扩展样例可验证阅读揭示。
+
+## 六项扩展的显示与交互
 
 MarkdownStyle 新增 highlight_foreground/highlight_background 和
 admonition_foreground/admonition_background。FromTheme 从语义主题色派生。
@@ -109,15 +135,15 @@ return Markdown(document)
 | 普通换行显示为硬换行 | 已通过 SoftBreakMode 接入，无需暴露原始 MD4C flag |
 | 公式语法（LATEXMATHSPANS） | 已接 AST、等宽源码回退、独占公式自定义渲染接口；完整公式排版后端仍待实现 |
 | 上下标（SUPERSCRIPTS/SUBSCRIPTS） | SDK 当前 TextSpanStyle 没有基线偏移，需补底层排版能力再承诺显示支持 |
-| 剧透（SPOILERS） | 需定义隐藏、显露、键盘/辅助功能与复制行为，不能只加背景色 |
+| 剧透（SPOILERS） | 已接 Spoiler AST、视觉遮盖、独立点击/键盘/辅助功能揭示；正文仍可复制 |
 | 空行保留（PRESERVEBLANKLINES） | 已接 BlankLines/count、布局和正文间复制分隔符；不代表源码无损往返 |
-| 宽松标题、禁用缩进代码、折叠空白 | 可选方言/归一化行为，暂不扩充公开选项，先确定实际需求 |
+| 宽松标题、禁用缩进代码、折叠空白 | 已提供独立 ParseOptions，默认行为不变；折叠在适配层处理制表符缺陷 |
 | HTML 输出/执行 | 不在原生控件范围；不因扩展语法而开启 |
 
 MD4C 的 syntax 字段是保留字段，不是语法插件接口。未来自定义语法另行设计，保持第三方代码
-与应用扩展层分离。后续阶段已新增独立 [Writer demo](../examples/editor/README.md)，当前为源码/阅读
-双模式基础上已接入段落/标题原位编辑及实时块预览；保守源码区间和块编辑会话均在库层。
-精确字形光标映射及统一事务仍待实现。见[块级编辑](block-editing.md)和[公式与编辑基础](math-and-editing.md)。
+与应用扩展层分离。[Writer demo](../examples/editor/README.md) 已支持段落/标题保持排版直接编辑，
+保守源码区间、语义格式模型和块编辑会话均在库层；统一事务仍待实现。
+见[块级编辑](block-editing.md)和[后续讨论](editor-follow-up.md)。
 
 ## 验证
 

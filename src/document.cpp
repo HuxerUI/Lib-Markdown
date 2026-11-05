@@ -110,6 +110,7 @@ struct Builder {
   std::vector<Restart> restarts;
   std::vector<std::optional<MarkdownSourceRange>> ranges;
   bool first_content = true;
+  bool collapsed_space = false;
   ParseOptions options;
   std::exception_ptr error;
 
@@ -208,6 +209,7 @@ int EnterBlock(MD_BLOCKTYPE type, void* detail, void* context) noexcept {
     default: throw std::runtime_error("Unexpected Markdown block");
     }
     auto& node = b.Push(kind);
+    b.collapsed_space = false;
     if (b.stack.size() == 2) {
       b.first_content = true;
       if (b.options.source_ranges) b.ranges.emplace_back();
@@ -295,6 +297,7 @@ int EnterSpan(MD_SPANTYPE type, void* detail, void* context) noexcept {
     case MD_SPAN_FOOTNOTE_REF: kind = NodeKind::FootnoteReference; break;
     case MD_SPAN_LATEXMATH: kind = NodeKind::InlineMath; break;
     case MD_SPAN_LATEXMATH_DISPLAY: kind = NodeKind::DisplayMath; break;
+    case MD_SPAN_SPOILER: kind = NodeKind::Spoiler; break;
     default: throw std::runtime_error("Unexpected Markdown span");
     }
     auto& node = b.Push(kind);
@@ -338,6 +341,18 @@ int TextCallback(MD_TEXTTYPE type, const MD_CHAR* data, MD_SIZE size, void* cont
     case MD_TEXT_SOFTBR: text = b.options.soft_break_mode == SoftBreakMode::LineBreak ? "\n" : " "; break;
     default: text.assign(data, size); break;
     }
+    // The vendored MD4C collapse flag drops tab-started whitespace marks. Collapse
+    // ordinary text here instead, retaining code/math/entities and source offsets.
+    if (b.options.collapse_whitespace && type == MD_TEXT_NORMAL) {
+      std::string collapsed;
+      for (const char c : text) {
+        if (c == ' ' || c == '\t' || c == '\v' || c == '\f') {
+          if (!b.collapsed_space) collapsed += ' ';
+          b.collapsed_space = true;
+        } else { collapsed += c; b.collapsed_space = false; }
+      }
+      text = std::move(collapsed);
+    } else b.collapsed_space = type == MD_TEXT_SOFTBR && text == " ";
     auto& parent = *b.stack.back();
     if (parent.kind == NodeKind::CodeBlock || parent.kind == NodeKind::Code ||
         parent.kind == NodeKind::InlineMath || parent.kind == NodeKind::DisplayMath) parent.text += text;
@@ -398,7 +413,12 @@ ParsedSource ParseValidatedSource(std::string_view source, const ParseOptions& o
   if (options.tables) parser.flags |= MD_FLAG_TABLES;
   if (options.strikethrough) parser.flags |= MD_FLAG_STRIKETHROUGH;
   if (options.task_lists) parser.flags |= MD_FLAG_TASKLISTS;
-  if (options.autolinks) parser.flags |= MD_FLAG_PERMISSIVEAUTOLINKS;
+  if (options.autolinks.urls) parser.flags |= MD_FLAG_PERMISSIVEURLAUTOLINKS;
+  if (options.autolinks.emails) parser.flags |= MD_FLAG_PERMISSIVEEMAILAUTOLINKS;
+  if (options.autolinks.www) parser.flags |= MD_FLAG_PERMISSIVEWWWAUTOLINKS;
+  if (options.spoilers) parser.flags |= MD_FLAG_SPOILERS;
+  if (options.permissive_atx_headings) parser.flags |= MD_FLAG_PERMISSIVEATXHEADERS;
+  if (!options.indented_code_blocks) parser.flags |= MD_FLAG_NOINDENTEDCODEBLOCKS;
   if (options.highlight) parser.flags |= MD_FLAG_HIGHLIGHT;
   if (options.insertions) parser.flags |= MD_FLAG_INSERT;
   if (options.underline) parser.flags |= MD_FLAG_UNDERLINE;
@@ -456,6 +476,18 @@ struct MarkdownDocument::Storage {
   explicit Storage(MarkdownNode value, std::vector<std::optional<MarkdownSourceRange>> positions = {})
       : root(std::move(value)), ranges(std::move(positions)) {}
 };
+
+ParseOptions ParseOptions::CommonMark() {
+  ParseOptions result;
+  result.tables = result.strikethrough = result.task_lists = false;
+  result.autolinks = {false, false, false};
+  return result;
+}
+ParseOptions ParseOptions::GitHub() {
+  ParseOptions result;
+  result.admonitions = result.footnotes = true;
+  return result;
+}
 
 MarkdownDocument::MarkdownDocument() {
   static const auto empty = std::make_shared<const Storage>(MarkdownNode{.kind = NodeKind::Document});

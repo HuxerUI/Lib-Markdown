@@ -78,7 +78,7 @@ int main() { return Run([] {
   for (int variant = 0; variant < 3; ++variant) {
     ParseOptions options;
     if (variant == 1) options.soft_break_mode = SoftBreakMode::LineBreak;
-    if (variant == 2) { options.tables = false; options.autolinks = false; options.task_lists = false; }
+    if (variant == 2) { options.tables = false; options.autolinks = {false, false, false}; options.task_lists = false; }
     for (const auto& seed : seeds) {
       MarkdownParseSession parser(options);
       auto text = seed;

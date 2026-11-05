@@ -14,7 +14,7 @@ struct Sample {
 inline huxerui::markdown::ParseOptions DemoParseOptions() {
   return {.highlight = true, .insertions = true, .underline = true,
           .wiki_links = true, .admonitions = true, .footnotes = true,
-          .math = true, .preserve_blank_lines = true};
+          .math = true, .preserve_blank_lines = true, .spoilers = true};
 }
 
 inline const std::array<Sample, 7>& Samples() {
@@ -135,6 +135,8 @@ View Article() {
 ==高亮文字==、++新增文字++、_下划线_，以及 **==嵌套格式==**。
 
 Wiki 链接：[[文档/开始|项目文档]]，目标交给应用处理。
+
+剧透：||点击揭示 **隐藏内容** 与 [链接](../spoiler.md)||，每个剧透单独揭示。
 
 > [!NOTE]
 > 提示内容支持 **粗体** 和 ==高亮==。

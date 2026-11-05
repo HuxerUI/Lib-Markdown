@@ -156,8 +156,15 @@ NodeKind numeric values are not a serialization ABI. Rebuild all consumers and
 update exhaustive node visitors; no compatibility aliases are provided.
 Additional opt-in math/blank-line support and UTF-16 source format commands are
 documented in [math and editing](math-and-editing.md). The separate Writer demo
-now uses the experimental MarkdownEditor for root paragraph/heading in-place source
-editing and live block preview. See [block editing](block-editing.md) for source
-ranges, controlled values and current caret/history limitations.
+now uses MarkdownEditor/MarkdownRichText for direct attributed paragraph/heading
+editing, with source fallback for unsupported inline structures. This requires
+HuxerUI TextField::TextStyles. See [block editing](block-editing.md) for source
+normalization, controlled coordinates and current structure/history limitations.
+
+`ParseOptions::autolinks` is now `MarkdownAutolinkOptions{urls, emails, www}`.
+Replace `.autolinks = false` with `.autolinks = {false, false, false}`; explicit
+links and angle autolinks remain independent. Syntax presets are available as
+`ParseOptions::CommonMark()` and `ParseOptions::GitHub()`; HTML remains literal.
+Spoilers and additional parser switches are opt-in; rebuild visitors for the new Spoiler kind.
 Compiled target-API examples are available in
 [tests/api_examples.cpp](../tests/api_examples.cpp).

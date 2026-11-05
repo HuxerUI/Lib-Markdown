@@ -1,4 +1,10 @@
 #pragma once
+#include <cstddef>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
 #include <huxerui/text_input.h>
 #include <huxerui/markdown/document.h>
 
@@ -16,6 +22,52 @@ enum class MarkdownEditCommand { Bold, Italic, InlineCode, Heading1, Heading2, B
 /// inline code; logic_error during active IME composition (finish it first).
 /// No history, parsing, UI state or implicit focus changes are performed.
 [[nodiscard]] TextEditingValue ApplyMarkdownCommand(const TextEditingValue& value, MarkdownEditCommand command);
+
+/// Semantic inline marks retained while editing displayed text. Source spelling
+/// within an edited block may be normalized; neighbouring source is untouched.
+struct MarkdownTextMark {
+  NodeKind kind = NodeKind::Strong;
+  std::string destination;
+  std::string title;
+  bool operator==(const MarkdownTextMark&) const = default;
+};
+struct MarkdownRichTextRun {
+  TextRange range;
+  std::vector<MarkdownTextMark> marks;
+};
+
+/// Display-text editing model for paragraphs/headings with supported inline marks.
+/// Input coordinates are visible UTF-16 positions, excluding Markdown delimiters.
+/// Replacements inherit the first replaced character's marks, or the preceding
+/// character's marks at an insertion boundary. Composition cancellation restores
+/// its original formatting. Serialization is verified with MD4C before acceptance.
+class MarkdownRichText final {
+public:
+  [[nodiscard]] static bool Supports(const MarkdownNode& node) noexcept;
+  explicit MarkdownRichText(const MarkdownNode& node, ParseOptions options = {});
+  [[nodiscard]] const TextEditingValue& Value() const noexcept { return value_; }
+  [[nodiscard]] std::vector<MarkdownRichTextRun> Runs() const;
+  [[nodiscard]] TextEditingValue SourceValue() const;
+  void Update(const TextEditingValue& value);
+private:
+  struct Character {
+    std::string text;
+    std::vector<MarkdownTextMark> marks;
+    bool operator==(const Character&) const = default;
+  };
+  TextEditingValue value_;
+  std::vector<Character> characters_;
+  std::optional<std::vector<Character>> composition_baseline_;
+  std::string composition_text_;
+  struct Revision { std::string text; std::string source; };
+  std::vector<Revision> history_;
+  std::size_t history_bytes_ = 0;
+  NodeKind kind_;
+  unsigned heading_level_ = 0;
+  ParseOptions options_;
+  void Append(const MarkdownNode& node, std::vector<MarkdownTextMark> marks);
+  [[nodiscard]] TextEditingValue Serialize(bool entities) const;
+};
 
 /// Thread-confined block editing model. Source remains authoritative and is never
 /// reconstructed from the AST. Only verified root paragraphs/headings can begin

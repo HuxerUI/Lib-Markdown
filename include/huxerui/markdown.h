@@ -29,6 +29,7 @@ struct MarkdownStyle {
   Color border = Color::Rgb(208, 215, 222);
   Color highlight_foreground = Color::Rgb(60, 45, 0);
   Color highlight_background = Color::Rgb(255, 235, 150);
+  Color spoiler_cover = Color::Rgb(87, 96, 106);
   Color admonition_foreground = Color::Rgb(9, 105, 218);
   Color admonition_background = Color::Rgb(246, 248, 250);
   std::array<float, 6> heading_sizes{32, 26, 22, 20, 18, 16};
@@ -146,17 +147,20 @@ struct MarkdownVirtualizationOptions {
 [[nodiscard]] View VirtualizedMarkdown(std::string_view source, MarkdownOptions options = {},
                                      MarkdownVirtualizationOptions virtualization = {});
 
-/// First-stage block editor: verified root paragraphs/headings are backed by a
-/// retained native TextField. Focus reveals that block's Markdown source; blur
-/// restores its formatted content. Other structures remain rendered/read-only.
-/// The active block can split/change syntax without remounting its input client.
+/// Native block editor. Supported paragraphs/headings edit displayed attributed
+/// text with hidden Markdown markers. Unsupported inline content falls back to
+/// in-place source input; other structures remain rendered/read-only.
 struct MarkdownEditorOptions {
   ParseOptions parse_options;
   MarkdownOptions markdown_options;
   MarkdownVirtualizationOptions virtualization;
-  /// Render the active source fragment below its input, synchronously on changes.
-  /// Fragment preview has local reference scope; the completed document uses full scope.
+  /// Show a preview below source fallback/empty-source input. Rich editing renders
+  /// directly without a duplicate preview. Fragment previews have local reference scope.
   bool live_preview = true;
+  /// Edit supported inline content directly with its typography and hidden markers.
+  /// Unsupported blocks retain in-place source editing. Edited blocks are serialized
+  /// semantically; source spelling inside that block can change.
+  bool rich_text = true;
 };
 
 struct MarkdownEditorEvents {
@@ -169,8 +173,9 @@ struct MarkdownEditorEvents {
 
 /// Owns virtual scrolling and requires bounded height. Click/Tab into a paragraph
 /// to edit; blur or Ctrl+Enter finishes it (never while IME composition is active).
-/// The native editor owns the active block's undo history only. Cross-block undo,
-/// exact rendered-glyph caret mapping and nested/table editing are not yet provided.
+/// Uses one attributed native paragraph for painting, hit testing, caret and IME.
+/// The native editor owns the active block's text history, with a bounded semantic
+/// formatting cache. Cross-block undo and nested/table editing are not yet provided.
 /// An empty document presents one native source field so writing can begin.
 [[nodiscard]] View MarkdownEditor(TextEditingValue value, MarkdownEditorOptions options = {});
 [[nodiscard]] inline View MarkdownEditor(const State<TextEditingValue>& value, MarkdownEditorOptions options = {}) {
