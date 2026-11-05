@@ -154,8 +154,9 @@ to 8 MiB and nesting to 128; the nesting limit can be configured up to 512.
 
 The [standalone Markdown Playground](examples/preview/README.md) provides editable
 source beside a native preview, five switchable samples, light/dark themes, and
-custom code/image renderer examples. Live preview is enabled with a cancellable
-120 ms debounce; pause it to render manually. Parse statistics show prefix reuse.
+custom code/image renderer examples. Live preview coalesces changes in cancellable
+120 ms windows, updating even during continuous typing; pause it to render manually.
+Parse statistics show prefix reuse.
 Narrow windows
 stack the panels; the source panel can also be hidden.
 

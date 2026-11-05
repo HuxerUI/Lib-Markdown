@@ -6,7 +6,7 @@
 ## 功能
 
 - 五组样例：基础排版、列表与表格、链接与边界、自定义渲染、长文档。
-- 左侧编辑 Markdown，默认在停止输入 120 ms 后自动更新右侧预览；可关闭「实时预览」后手动渲染。
+- 左侧编辑 Markdown，默认按 120 ms 窗口合并输入并更新右侧预览，长按连续输入也会刷新；可关闭「实时预览」后手动渲染。
 - 会话增量解析，底部显示全量/增量模式、重解析字节数和复用的顶层块数。
 - 点击「重置样例」恢复原文，取消过期输入任务。
 - 明暗主题切换、隐藏/显示源码；窄窗口自动变成上下布局。
@@ -14,7 +14,7 @@
 - 自定义代码卡片展示语言和行号；自定义图片回调绘制本地 Canvas。
 
 编辑器演示完整受控输入，`MarkdownParseSession` 接收完整源码并复用未受影响的前部块。
-防抖后在 UI 线程同步解析；大文档应用可自行串行调度到工作线程。引用定义等情况回退全量
+窗口到期后在 UI 线程同步解析；大文档应用可自行串行调度到工作线程。引用定义等情况回退全量
 解析，失败保留上次成功预览。它没有虚拟化或节点级增量渲染。链接只显示回调，不会打开浏览器。
 图片示例仅识别 `demo:landscape`，
 不请求网络。组件默认渲染行为可以通过「自定义渲染」开关对比。
@@ -58,7 +58,7 @@ Windows/Visual Studio 输出位于 `build/examples/preview/Release/markdown_prev
 
 ## 交互测试
 
-HuxerUI 源码提供的无窗口测试库可以验证防抖、过期任务取消、自动/手动切换、增量更新保留滚动、样例切换、重置、链接回调、
+HuxerUI 源码提供的无窗口测试库可以验证连续输入刷新、最新输入合并、过期任务取消、自动/手动切换、增量更新保留滚动、样例切换、重置、链接回调、
 主题切换、自定义渲染，以及窄窗口布局：
 
 ```sh
@@ -81,7 +81,8 @@ CI 会独立构建并测试 demo，在成功的 `native (preview)` 作业中上�
 ---
 
 This standalone desktop demo uses the library's public API. Choose one of five
-samples and edit its Markdown. Live preview uses a cancellable 120 ms debounce;
+samples and edit its Markdown. Live preview coalesces changes in cancellable 120 ms
+windows, refreshing during continuous typing;
 pause it for manual rendering. Statistics show tail parsing and prefix reuse.
 It supports
 light/dark themes, a compact stacked layout, link callbacks, and custom code and

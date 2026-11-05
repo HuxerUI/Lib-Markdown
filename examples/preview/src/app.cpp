@@ -64,10 +64,14 @@ struct PreviewSession {
   MarkdownParseSession parser;
   TaskHandle pending;
   std::uint64_t request = 0;
+  bool scheduled = false;
+  std::string latest_source;
 
   void CancelPending() {
     pending.Cancel();
     ++request;
+    scheduled = false;
+    latest_source.clear();
   }
 };
 
@@ -92,13 +96,24 @@ void PublishPreview(const std::shared_ptr<PreviewSession>& session, const std::s
 void RequestPreview(const std::shared_ptr<PreviewSession>& session, TaskScope tasks, std::string source,
                     State<MarkdownDocument> document, State<MarkdownParseStats> stats,
                     State<std::string> message, bool immediate = false) {
-  session->CancelPending();
-  if (immediate) { PublishPreview(session, source, document, stats, message); return; }
+  if (immediate) {
+    session->CancelPending();
+    PublishPreview(session, source, document, stats, message);
+    return;
+  }
+  // Keep the existing deadline during key repeat; publish the newest input at
+  // the end of this window instead of waiting indefinitely for typing to stop.
+  session->latest_source = std::move(source);
+  if (session->scheduled) return;
+  session->scheduled = true;
   const auto request = session->request;
   message = "等待实时预览…";
   session->pending = tasks.Launch([=]() -> Task<void> {
     co_await Delay(std::chrono::milliseconds(120));
-    if (session->request == request) PublishPreview(session, source, document, stats, message);
+    if (session->request != request) co_return;
+    session->scheduled = false;
+    auto latest = std::move(session->latest_source);
+    PublishPreview(session, latest, document, stats, message);
   });
 }
 

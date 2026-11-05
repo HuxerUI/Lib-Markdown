@@ -55,7 +55,7 @@ int main(int argc, char** argv) { return Run([&] {
   auto editor = ui.Find(UiSelector::Key("source-editor"));
   editor.Tap();
   editor.ReplaceText("# 编辑后的标题\n\n[点我](../guide.md)");
-  // Real virtual-time debounce: typing alone publishes a new snapshot.
+  // Typing alone publishes a new snapshot after the coalescing window.
   CHECK(preview().Find(UiSelector::Text("你好，Markdown")).Exists());
   advance(std::chrono::milliseconds(121));
   CHECK(preview().Find(UiSelector::Text("编辑后的标题")).Exists());
@@ -73,7 +73,7 @@ int main(int argc, char** argv) { return Run([&] {
   advance(std::chrono::milliseconds(60));
   replace("# 最新输入\n");
   advance(std::chrono::milliseconds(61));
-  CHECK(preview().Find(UiSelector::Text("编辑后的标题")).Exists());
+  CHECK(preview().Find(UiSelector::Text("最新输入")).Exists());
   CHECK(!preview().Find(UiSelector::Text("过期输入")).Exists());
   advance(std::chrono::milliseconds(60));
   CHECK(preview().Find(UiSelector::Text("最新输入")).Exists());
@@ -81,10 +81,26 @@ int main(int argc, char** argv) { return Run([&] {
   ui.Find(UiSelector::Key("source-editor")).SetSelection({0, 0});
   advance(std::chrono::milliseconds(200));
   CHECK(ui.Find(UiSelector::Key("status")).One().text == unchanged_status);
+  replace("# 连续输入\n\nstart");
+  std::string repeated = "start";
+  for (int i = 0; i < 12; ++i) {
+    // Simulate held-key text repeat faster than the preview interval, without
+    // a pause: each 120 ms window must publish the latest text seen so far.
+    ui.Find(UiSelector::Key("source-editor")).EnterText("x");
+    repeated += "x";
+    advance(std::chrono::milliseconds(30));
+    if (i % 4 == 3) CHECK(preview().Find(UiSelector::Text(repeated)).Exists());
+  }
+  ui.Find(UiSelector::Key("source-editor")).EnterText("tail");
+  advance(std::chrono::milliseconds(119));
+  CHECK(preview().Find(UiSelector::Text(repeated)).Exists());
+  advance(std::chrono::milliseconds(2));
+  CHECK(preview().Find(UiSelector::Text(repeated + "tail")).Exists());
+  replace("# 关闭时取消待处理输入\n");
   ui.Find(UiSelector::Key("live-toggle")).Tap();
   replace("# 手动预览\n");
   advance(std::chrono::milliseconds(200));
-  CHECK(preview().Find(UiSelector::Text("最新输入")).Exists());
+  CHECK(preview().Find(UiSelector::Text(repeated + "tail")).Exists());
   ui.Find(UiSelector::Key("render")).Tap();
   CHECK(preview().Find(UiSelector::Text("手动预览")).Exists());
   replace("# 重新开启\n");

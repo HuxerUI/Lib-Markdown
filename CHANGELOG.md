@@ -18,8 +18,10 @@ Public API normalization; rebuild the library and applications together. See
 - Add MarkdownParseSession with full-source updates, UTF-8 byte edits, immutable
   snapshots, safe prefix reuse/tail reparsing and diagnostic statistics. Fall back
   to full parsing for potential references or unavailable restart boundaries.
-- Enable cancellable 120 ms live preview by default, with manual mode, error
+- Enable cancellable 120 ms coalesced live preview by default, with manual mode, error
   retention, parse diagnostics and preserved scroll during editing.
+- Keep the preview updating during held-key input by retaining the pending deadline
+  and rendering the latest source instead of restarting a trailing debounce.
 - Add differential parser edits and virtual-time live-preview interaction tests.
 
 No release tag has been created. Syntax support and rendering defaults are unchanged.
