@@ -53,6 +53,15 @@ View LocalImage(const MarkdownNode& image, const ThemeSpec& theme) {
   }.With(Spacing(8.0F), CrossAlign(CrossAxisAlignment::Stretch));
 }
 
+View MathSourceCard(const MarkdownNode& math, const ThemeSpec& theme) {
+  return Column{
+    Text("LaTeX 源码 · 渲染接口示例").With(Foreground{theme.colors.primary}),
+    Text(math.text).Style({Font::Monospace(16), theme.colors.on_surface}),
+  }.With(Padding(16.0F), Spacing(8.0F), CrossAlign(CrossAxisAlignment::Stretch),
+         Background{theme.colors.surface_container_highest}, Border{theme.colors.outline, 1.0F})
+      .Key("custom-math");
+}
+
 View Panel(std::string title, View content, const ThemeSpec& theme) {
   return Column{
     Text(std::move(title)).Style({Font::System(16).WithWeight(FontWeight::SemiBold), theme.colors.on_surface}),
@@ -197,7 +206,7 @@ View App() {
             editor = SourceValue(Samples()[i].source);
             RequestPreview(session.Get(), tasks, Samples()[i].source, document, stats, message, true);
             document_version = document_version.Get() + 1;
-            custom = i == 3;
+            custom = i == 3 || i == 6;
             message = "已载入：" + Samples()[i].name;
           }).Key("sample-" + std::to_string(i)));
     }
@@ -205,6 +214,7 @@ View App() {
     if (custom.Get()) {
       options.code_block_renderer = [theme](const MarkdownNode& code) { return CodeCard(code, theme); };
       options.standalone_image_renderer = [theme](const MarkdownNode& image) { return LocalImage(image, theme); };
+      options.standalone_math_renderer = [theme](const MarkdownNode& math) { return MathSourceCard(math, theme); };
     }
 
     View rendered = virtualized.Get() ? VirtualizedMarkdown(document.Get(), std::move(options))

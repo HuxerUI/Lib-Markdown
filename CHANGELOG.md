@@ -39,5 +39,13 @@ Public API normalization; rebuild the library and applications together. See
 - Add the MD4C Extensions demo sample and a capability/next-step matrix. Extend
   NodeKind without preserving numeric ABI; rebuild and update exhaustive visitors.
 
+- Add optional literal math AST nodes with standalone formula renderer integration,
+  explicit source fallback and no implicit TeX backend.
+- Add BlankLines/count parsing, configurable spacing and interior logical copy
+  separators in ordinary and virtual views, with differential edit/stream tests.
+- Add pure UTF-16-aware ApplyMarkdownCommand formatting operations and the separate
+  experimental Writer demo with source/reading modes; paragraph in-place editing
+  and shared undo history are not implemented. Build/test both apps independently.
+
 No release tag has been created. Default syntax remains unchanged; new extensions
 are explicitly enabled. Demo parsing enables the optional extensions.

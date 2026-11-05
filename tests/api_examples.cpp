@@ -71,4 +71,15 @@ View ExtendedArticle(std::string_view source) {
       .On<MarkdownEvents::WikiLinkActivated>([](const MarkdownWikiLinkActivation& event) { (void)event.target; })
       .On<MarkdownEvents::FootnoteActivated>([](const MarkdownFootnoteActivation& event) { (void)event.number; });
 }
+
+View MathSource(std::string_view source) {
+  auto document = ParseMarkdown(source, {.math = true, .preserve_blank_lines = true});
+  return Markdown(document, {.standalone_math_renderer = [](const MarkdownNode& math) -> View {
+    return Text(math.text); // Replace with your formula backend; this example displays source.
+  }});
+}
+
+TextEditingValue FormatSelection(TextEditingValue value) {
+  return ApplyMarkdownCommand(value, MarkdownEditCommand::Bold);
+}
 } // namespace markdown_examples

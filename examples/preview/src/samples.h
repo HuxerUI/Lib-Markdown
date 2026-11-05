@@ -13,11 +13,12 @@ struct Sample {
 
 inline huxerui::markdown::ParseOptions DemoParseOptions() {
   return {.highlight = true, .insertions = true, .underline = true,
-          .wiki_links = true, .admonitions = true, .footnotes = true};
+          .wiki_links = true, .admonitions = true, .footnotes = true,
+          .math = true, .preserve_blank_lines = true};
 }
 
-inline const std::array<Sample, 6>& Samples() {
-  static const std::array<Sample, 6> samples{{
+inline const std::array<Sample, 7>& Samples() {
+  static const std::array<Sample, 7> samples{{
     {"基础排版", R"md(# 你好，Markdown
 
 用原生 HuxerUI 组件阅读和展示 Markdown。
@@ -154,6 +155,19 @@ Wiki 链接：[[文档/开始|项目文档]]，目标交给应用处理。
 
 [^说明]: 脚注保留中文标签，按首次引用顺序编号。
 [^第二]: 后追加的定义可能影响前文，自动回退全量解析。
+)md"},
+    {"公式与空行", R"md(# 公式语法与空行
+
+混排中的 $x^2 + y^2$ 以等宽 LaTeX 源码显示，尚未接入行内公式排版。
+
+$$\frac{a}{b}$$
+
+上方独占公式进入自定义渲染接口。此卡片仅展示源码，不是数学排版引擎。
+
+
+这里之前有两个空行，保留为显式空白块，可同时测试虚拟化与复制。
+
+`$代码中的内容保持字面$`，未闭合的 $标记也保持字面。
 )md"},
   }};
   return samples;

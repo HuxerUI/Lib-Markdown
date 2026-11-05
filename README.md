@@ -13,6 +13,7 @@ CommonMark parser, configurable GFM extensions, and ordinary declarative views.
 - Bold, italic, nested emphasis, inline code, strikethrough, and reference links
 - GFM tables with alignment and horizontal scrolling, read-only task lists, autolinks
 - Opt-in highlight, insertion, underline, Wiki links, GitHub-style admonitions and footnotes
+- Optional math AST/source fallback, standalone math renderer integration and explicit blank lines
 - Native attributed text with Unicode-safe ranges and application-owned link activation
 - Selection/copy through `SelectionArea`, ambient light/dark themes, custom code/image renderers
 - Immutable documents that can be parsed on a worker and reused across recompositions
@@ -131,6 +132,14 @@ reference. Neither new event automatically navigates or also emits LinkActivated
 Snapshots, streaming and virtualization support all six. See the
 [capability matrix and contracts](docs/md4c-extensions.md).
 
+`ParseOptions::math` recognizes literal LaTeX bodies as InlineMath/DisplayMath;
+the default is monospace source, not formula typesetting. A
+`standalone_math_renderer` can replace a paragraph containing only one formula;
+mixed inline formulas retain the source fallback. `preserve_blank_lines` emits
+BlankLines/count nodes with configurable `MarkdownStyle::blank_line_height` and
+interior selection separators. Both options default to off. See
+[math, blank lines and editing contracts](docs/math-and-editing.md).
+
 ## Streaming input
 
 ```cpp
@@ -194,8 +203,9 @@ return Markdown(document, {
 `title`, and alt text via `PlainText(node)`). Supply your loader, URI policy,
 dimensions, and placeholder there. Images otherwise render alt text; embedded
 inline images always render alt text. No image is fetched automatically.
-Both renderer callbacks execute during UI composition and borrow their node for
-that call. Copy needed fields or retain the document for delayed callbacks. They
+Renderer callbacks execute during UI composition and borrow their node for
+that call. Copy needed fields for delayed callbacks: nodes may be render-owned
+copies, so retaining the input document alone does not retain a callback reference. They
 may run again on recomposition and do not guarantee a particular invocation count.
 
 ## Links and input behavior
@@ -219,13 +229,15 @@ to 8 MiB and nesting to 128; the nesting limit can be configured up to 512.
 ## Interactive demo
 
 The [standalone Markdown Playground](examples/preview/README.md) provides editable
-source beside a native preview, six switchable samples, light/dark themes, and
+source beside a native preview, seven switchable samples, light/dark themes, and
 custom code/image renderer examples. Live preview coalesces changes in cancellable
 120 ms windows, updating even during continuous typing; pause it to render manually.
 Parse statistics show prefix reuse. Toggle virtualization or replay a sample as
 48-byte chunks every 40 ms with the streaming controls.
 The MD4C Extensions sample enables all six optional extensions; its Wiki/footnote
 events appear in the status bar.
+The Math and Blank Lines sample demonstrates the source fallback and custom math
+renderer boundary; it does not claim a TeX typesetting backend.
 Narrow windows
 stack the panels; the source panel can also be hidden.
 
@@ -237,6 +249,20 @@ cmake --build build-preview --config Release --parallel
 With Visual Studio, launch `build-preview/Release/markdown_preview.exe`; keep its
 `markdown_preview.resources` directory alongside it. CI publishes a Windows demo
 artifact after its standalone build and interaction tests pass.
+
+The separate [Markdown Writer](examples/editor/README.md) is the experimental
+Typora-inspired editing demo. Its first stage offers source/reading modes, optional
+live preview and a formatting toolbar using the library's `ApplyMarkdownCommand`.
+It preserves UTF-16 selections and rejects formatting during active IME composition.
+In-place paragraph editing and shared undo history remain future work.
+
+```sh
+cmake -S examples/editor -B build-editor -DHUXERUI_HOME=/path/to/HuxerUI
+cmake --build build-editor --config Release --parallel
+```
+
+With Visual Studio, run `build-editor/Release/markdown_editor.exe` with its sibling
+resource directory. A root build with examples enabled builds both demos.
 
 ## Build and test
 
@@ -279,7 +305,7 @@ enabling compilers or building MD4C. The library has no generated resource packa
 Task checkboxes are presentation only. Code blocks use wrapped monospace text by
 default; provide a renderer for highlighting or different scrolling. Table columns
 have a configurable fixed width, with per-cell wrapping and GFM alignment.
-Math, diagrams, HTML execution and a reusable editor component are outside
+Mathematical typesetting, diagrams, HTML execution and a reusable visual editor component are outside
 this version. Virtualization operates at top-level blocks; streaming uses ordinary
 Markdown semantics without inventing a partial-input grammar.
 

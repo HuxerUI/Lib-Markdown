@@ -5,6 +5,7 @@
 #include <optional>
 
 #include <huxerui/markdown/document.h>
+#include <huxerui/markdown/editing.h>
 #include <huxerui/theme.h>
 #include <huxerui/view.h>
 #include <huxerui/scroll.h>
@@ -14,7 +15,7 @@ namespace huxerui::markdown {
 /// Complete local appearance override, in DIPs. Omission in MarkdownOptions follows
 /// the enclosing HuxerUI theme; an explicit value replaces the complete appearance.
 /// Heading sizes and table_cell_width must be finite and positive; spacing, indent,
-/// padding and corner_radius must be finite and nonnegative. Invalid values throw
+/// padding, corner_radius and blank_line_height must be finite and nonnegative. Invalid values throw
 /// invalid_argument at declaration or composition. This is not an Environment theme.
 struct MarkdownStyle {
   TextStyle body{Font::System(16.0F), Color::Rgb(31, 35, 40)};
@@ -36,6 +37,8 @@ struct MarkdownStyle {
   float code_padding = 12.0F;
   float corner_radius = 6.0F;
   float table_cell_width = 180.0F;
+  /// Nonnegative finite height per BlankLines line in DIPs; replaces adjacent block gaps.
+  float blank_line_height = 20.0F;
 
   /// Derive a complete appearance from an explicit HuxerUI theme snapshot.
   [[nodiscard]] static MarkdownStyle FromTheme(const ThemeSpec& theme);
@@ -47,6 +50,8 @@ using MarkdownLinkPolicy = std::function<bool(std::string_view)>;
 /// Produces a View for CodeBlock only, on the composing UI thread. The node is
 /// borrowed for the call; copy needed fields into delayed callbacks. Invocation
 /// count is not stable across recompositions. Exceptions propagate to the caller.
+/// Nodes may be render-owned copies; retaining the input document alone does not
+/// extend the lifetime of this callback reference.
 using MarkdownCodeBlockRenderer = std::function<View(const MarkdownNode&)>;
 /// Produces a View for the Image that is the sole child of a paragraph. The same
 /// borrowing/thread rules apply as for MarkdownCodeBlockRenderer; inline images
@@ -54,6 +59,10 @@ using MarkdownCodeBlockRenderer = std::function<View(const MarkdownNode&)>;
 using MarkdownStandaloneImageRenderer = std::function<View(const MarkdownNode&)>;
 /// Optional replacement for an entire Admonition block, with the same borrowing rules.
 using MarkdownAdmonitionRenderer = std::function<View(const MarkdownNode&)>;
+/// A math node that is the sole child of a Paragraph. InlineMath or DisplayMath;
+/// node.text is literal LaTeX without delimiters. Same borrowing/thread rules as
+/// other renderers. Mixed inline math always uses a literal monospace fallback.
+using MarkdownStandaloneMathRenderer = std::function<View(const MarkdownNode&)>;
 
 /// Display configuration only. Set ParseOptions with ParseMarkdown before rendering.
 struct MarkdownOptions {
@@ -69,6 +78,9 @@ struct MarkdownOptions {
   /// Optional replacement for a fenced/indented code block (e.g. syntax highlighting).
   MarkdownCodeBlockRenderer code_block_renderer;
   MarkdownAdmonitionRenderer admonition_renderer;
+  /// Optional application-owned formula backend. Default displays literal LaTeX,
+  /// not mathematical typesetting; does not replace math mixed with other text.
+  MarkdownStandaloneMathRenderer standalone_math_renderer;
 };
 
 /// Owned link information. Destination preserves decoded relative paths, anchors and Unicode.
@@ -126,7 +138,7 @@ struct MarkdownVirtualizationOptions {
 /// With selectable=true, a logical text source supports copying offscreen text without
 /// mounting it. List markers are decorative. Custom-rendered code/images contribute
 /// source text to full selection, but their unbound custom Text is not an endpoint.
-/// The same rule applies to custom admonitions; generated titles/definition numbers are decorative.
+/// The same rule applies to custom admonitions/math; generated titles/definition numbers are decorative.
 /// MarkdownEvents bind as on Markdown; callbacks may repeat when items re-enter view.
 [[nodiscard]] View VirtualizedMarkdown(MarkdownDocument document, MarkdownOptions options = {},
                                      MarkdownVirtualizationOptions virtualization = {});

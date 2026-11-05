@@ -120,7 +120,8 @@ View Markdown(MarkdownDocument document, MarkdownOptions options = {});
 - 省略 style 时，在组件组合作用域内根据当前 ThemeSpec 派生外观，继续跟随主题变化。
 - 显式 style 是完整外观值。本轮不引入逐字段可选覆盖或 `ProvideEnvironment(MarkdownTheme, ...)`。
 - 自定义 renderer 返回普通 View；接收节点的引用仅在回调期间借用。
-  在返回 View 的异步/延迟回调中使用节点信息时，应复制需要的数据或保留文档快照。
+  在返回 View 的异步/延迟回调中使用节点信息时，应复制需要的数据。后续虚拟化可使用渲染副本，
+  仅保留输入快照不能延长该回调引用的生命周期。
 - renderer 的调用次数不稳定，不应承担一次性外部操作；图片加载及 URI 策略仍由应用负责。
 - `link_policy` 保留当前空值默认策略。`IsDefaultLinkAllowed()` 的判断与旧函数保持一致，
   不新增 URL 解析、相对路径解析、浏览器打开或网络请求行为。

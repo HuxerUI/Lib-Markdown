@@ -130,8 +130,9 @@ inline images are not newly routed to these callbacks.
 
 `MarkdownLinkPolicy`, `MarkdownCodeBlockRenderer` and
 `MarkdownStandaloneImageRenderer` name the callback types. Renderer nodes are
-borrowed for one composition-time call, and calls may repeat. Copy data or retain
-the snapshot when building delayed callbacks. Loading and other side effects
+borrowed for one composition-time call, and calls may repeat. Copy data when
+building delayed callbacks; nodes can be render-owned copies, so retaining only
+the input snapshot does not retain a callback reference. Loading and other side effects
 remain application-owned.
 
 ## Upgrade checklist / 升级检查
@@ -153,5 +154,8 @@ Six optional MD4C extensions add AST kinds/fields, styles, an admonition rendere
 and typed Wiki/footnote events; see [the extension contract](md4c-extensions.md).
 NodeKind numeric values are not a serialization ABI. Rebuild all consumers and
 update exhaustive node visitors; no compatibility aliases are provided.
+Additional opt-in math/blank-line support and UTF-16 source format commands are
+documented in [math and editing](math-and-editing.md). The separate Writer demo
+is experimental source/reading mode, with in-place editing still pending.
 Compiled target-API examples are available in
 [tests/api_examples.cpp](../tests/api_examples.cpp).

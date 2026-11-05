@@ -13,9 +13,9 @@ namespace huxerui::markdown {
 enum class NodeKind {
   Document, Paragraph, Heading, BlockQuote, UnorderedList, OrderedList, ListItem,
   ThematicBreak, CodeBlock, Table, TableHead, TableBody, TableRow, TableHeaderCell,
-  TableCell, Admonition, FootnoteSection, FootnoteDefinition,
+  TableCell, Admonition, FootnoteSection, FootnoteDefinition, BlankLines,
   Emphasis, Strong, Strikethrough, Underline, Highlight, Insertion, Code, Link,
-  WikiLink, FootnoteReference, Image, Text,
+  WikiLink, FootnoteReference, InlineMath, DisplayMath, Image, Text,
 };
 
 enum class AdmonitionKind { Note, Tip, Important, Warning, Caution };
@@ -26,7 +26,7 @@ enum class CellAlignment { Default, Left, Center, Right };
 /// Owned UTF-8 syntax tree. No node borrows the input or MD4C callback storage.
 struct MarkdownNode {
   NodeKind kind = NodeKind::Text;
-  /// UTF-8 literal for Text, Code and CodeBlock; other nodes store text in children.
+  /// UTF-8 literal for Text, Code, CodeBlock and math bodies (without $ delimiters).
   std::string text;
   std::vector<MarkdownNode> children;
   /// 1..6 for Heading; zero otherwise.
@@ -55,6 +55,8 @@ struct MarkdownNode {
   unsigned footnote_reference = 0;
   /// FootnoteDefinition: total references in this parse.
   unsigned footnote_reference_count = 0;
+  /// BlankLines: count reported by MD4C; not a source position or byte offset.
+  unsigned blank_line_count = 0;
 
   bool operator==(const MarkdownNode&) const = default;
 };
@@ -81,6 +83,10 @@ struct ParseOptions {
   bool wiki_links = false; ///< [[target]] or [[target|label]]; opaque application-owned target.
   bool admonitions = false; ///< > [!NOTE], TIP, IMPORTANT, WARNING, CAUTION.
   bool footnotes = false; ///< [^label] and [^label]: definition; can affect earlier content.
+  /// Recognize $...$ / $$...$$. Stores literal LaTeX, does not validate/typeset it.
+  bool math = false;
+  /// Emit BlankLines nodes for runs reported by MD4C; not lossless source retention.
+  bool preserve_blank_lines = false;
   /// Does not change explicit hard breaks or newlines inside code blocks/spans.
   SoftBreakMode soft_break_mode = SoftBreakMode::Space;
   /// Positive UTF-8 input-byte limit, default 8 MiB; exceeding it throws length_error.

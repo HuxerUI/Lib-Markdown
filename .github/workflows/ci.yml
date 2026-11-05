@@ -36,6 +36,9 @@ jobs:
           - name: preview
             source: examples/preview
             options: -DHUXERUI_MARKDOWN_PREVIEW_BUILD_TESTS=ON
+          - name: editor
+            source: examples/editor
+            options: -DHUXERUI_MARKDOWN_EDITOR_BUILD_TESTS=ON
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -52,11 +55,11 @@ jobs:
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
       - name: Upload Windows demo
-        if: matrix.name == 'preview'
+        if: matrix.name != 'library'
         uses: actions/upload-artifact@v4
         with:
-          name: markdown-preview-windows
+          name: markdown-${{ matrix.name }}-windows
           if-no-files-found: error
           path: |
-            build/Release/markdown_preview.exe
-            build/Release/markdown_preview.resources/
+            build/Release/markdown_${{ matrix.name }}.exe
+            build/Release/markdown_${{ matrix.name }}.resources/

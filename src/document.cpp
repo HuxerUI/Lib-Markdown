@@ -189,10 +189,13 @@ int EnterBlock(MD_BLOCKTYPE type, void* detail, void* context) noexcept {
     case MD_BLOCK_ADMONITION: kind = NodeKind::Admonition; break;
     case MD_BLOCK_FOOTNOTE_DEF_SECTION: kind = NodeKind::FootnoteSection; break;
     case MD_BLOCK_FOOTNOTE_DEF: kind = NodeKind::FootnoteDefinition; break;
+    case MD_BLOCK_BLANK: kind = NodeKind::BlankLines; break;
     default: throw std::runtime_error("Unexpected Markdown block");
     }
     auto& node = b.Push(kind);
     if (b.stack.size() == 2) b.first_content = true;
+    if (type == MD_BLOCK_BLANK)
+      node.blank_line_count = static_cast<MD_BLOCK_BLANK_DETAIL*>(detail)->line_count;
     if (type == MD_BLOCK_ADMONITION) {
       const auto name = Attribute(static_cast<MD_BLOCK_ADMONITION_DETAIL*>(detail)->type);
       if (name == "tip") node.admonition_kind = AdmonitionKind::Tip;
@@ -272,6 +275,8 @@ int EnterSpan(MD_SPANTYPE type, void* detail, void* context) noexcept {
     case MD_SPAN_INS: kind = NodeKind::Insertion; break;
     case MD_SPAN_WIKILINK: kind = NodeKind::WikiLink; break;
     case MD_SPAN_FOOTNOTE_REF: kind = NodeKind::FootnoteReference; break;
+    case MD_SPAN_LATEXMATH: kind = NodeKind::InlineMath; break;
+    case MD_SPAN_LATEXMATH_DISPLAY: kind = NodeKind::DisplayMath; break;
     default: throw std::runtime_error("Unexpected Markdown span");
     }
     auto& node = b.Push(kind);
@@ -315,7 +320,8 @@ int TextCallback(MD_TEXTTYPE type, const MD_CHAR* data, MD_SIZE size, void* cont
     default: text.assign(data, size); break;
     }
     auto& parent = *b.stack.back();
-    if (parent.kind == NodeKind::CodeBlock || parent.kind == NodeKind::Code) parent.text += text;
+    if (parent.kind == NodeKind::CodeBlock || parent.kind == NodeKind::Code ||
+        parent.kind == NodeKind::InlineMath || parent.kind == NodeKind::DisplayMath) parent.text += text;
     else if (!parent.children.empty() && parent.children.back().kind == NodeKind::Text)
       parent.children.back().text += text;
     else parent.children.push_back(MarkdownNode{.kind = NodeKind::Text, .text = std::move(text)});
@@ -330,12 +336,17 @@ bool IsBlock(NodeKind kind) {
   case NodeKind::Table: case NodeKind::TableHead: case NodeKind::TableBody:
   case NodeKind::TableRow: case NodeKind::TableHeaderCell: case NodeKind::TableCell:
   case NodeKind::Admonition: case NodeKind::FootnoteSection: case NodeKind::FootnoteDefinition:
+  case NodeKind::BlankLines:
     return true;
   default: return false;
   }
 }
 
 void CollectText(const MarkdownNode& node, std::string& out) {
+  if (node.kind == NodeKind::BlankLines) {
+    out.append(node.blank_line_count, '\n');
+    return;
+  }
   out += node.text;
   for (std::size_t i = 0; i < node.children.size(); ++i) {
     if (i && IsBlock(node.children[i].kind) && !out.empty() && out.back() != '\n') out += '\n';
@@ -374,6 +385,8 @@ ParsedSource ParseValidatedSource(std::string_view source, const ParseOptions& o
   if (options.wiki_links) parser.flags |= MD_FLAG_WIKILINKS;
   if (options.admonitions) parser.flags |= MD_FLAG_ADMONITIONS;
   if (options.footnotes) parser.flags |= MD_FLAG_FOOTNOTES;
+  if (options.math) parser.flags |= MD_FLAG_LATEXMATHSPANS;
+  if (options.preserve_blank_lines) parser.flags |= MD_FLAG_PRESERVEBLANKLINES;
   parser.enter_block = EnterBlock;
   parser.leave_block = LeaveBlock;
   parser.enter_span = EnterSpan;

@@ -105,6 +105,12 @@ return Markdown(document)
 点击产生独立事件，不自动滚动。流式、增量和虚拟化均适用。
 完整支持范围和后续顺序见 [MD4C 能力矩阵](docs/md4c-extensions.md)。
 
+第二阶段可选 `math = true` 识别公式正文，默认按等宽源码显示；
+`standalone_math_renderer` 可接入独占段落公式的自定义显示，混排行内公式仍为源码回退。
+`preserve_blank_lines = true` 保留 BlankLines/count，使用 `blank_line_height` 控制间距并保留
+正文间复制换行。两项默认关闭，不代表已完成公式排版或源码无损往返。
+详见 [公式、空行与编辑基础](docs/math-and-editing.md)。
+
 ## 配置
 
 - `ParseOptions`：传给 `ParseMarkdown`，分别控制表格、删除线、任务列表、自动链接和换行规则。
@@ -122,7 +128,8 @@ auto document = ParseMarkdown(source, {.soft_break_mode = SoftBreakMode::LineBre
 return Markdown(document);
 ```
 
-renderer 在 UI 组合时执行，节点引用仅在回调期间借用，延迟使用时复制需要的数据或保留文档。
+renderer 在 UI 组合时执行，节点引用仅在回调期间借用，延迟使用时复制需要的数据。
+节点可能是渲染层拥有的副本，仅保留输入文档不能延长回调引用的生命周期。
 事件处理器在重组后更新，组件卸载后停止通知；事件引用需要保留时也应复制。
 `IsDefaultLinkAllowed()` 只表达默认允许策略，不代表完整 URI 校验或导航安全保证。
 
@@ -130,16 +137,17 @@ renderer 在 UI 组合时执行，节点引用仅在回调期间借用，延迟�
 `std::length_error`；无效 UTF-8 会抛出 `std::invalid_argument`。
 
 任务复选框只读；表格使用固定列宽并支持横向滚动；默认代码块为可换行的等宽文本。
-组件本身不包含可复用编辑器、数学公式或 HTML 执行。增量解析由独立会话提供。
+组件本身不包含完整可视化编辑器、数学排版或 HTML 执行。增量解析由独立会话提供。
 
 ## 交互 Demo
 
-[Markdown Playground](examples/preview/README.md) 提供源码编辑与渲染对照、六组样例、
+[Markdown Playground](examples/preview/README.md) 提供源码编辑与渲染对照、七组样例、
 明暗主题、链接反馈和自定义代码/图片渲染。默认按 120 ms 窗口合并输入并刷新预览，
 持续输入也会更新，可关闭后点击
 「渲染」手动更新；底部显示重解析字节和复用块数。窄窗口自动上下排列。
 「虚拟化」切换按需挂载；「流式重放」每 40 ms 追加最多 48 字节，可随时停止，编辑或切换样例也会取消重放。
 「MD4C 扩展」样例开启六项可选语法，状态栏显示 Wiki 与脚注事件。
+「公式与空行」展示源码回退和自定义公式接口，不是公式排版引擎。
 
 ```sh
 cmake -S examples/preview -B build-preview -DHUXERUI_HOME=/path/to/HuxerUI
@@ -148,6 +156,18 @@ cmake --build build-preview --config Release --parallel
 
 Windows/Visual Studio 下运行 `build-preview/Release/markdown_preview.exe`，
 并保留旁边的 `markdown_preview.resources` 目录。CI 会提供 Windows demo artifact。
+
+第二个 [Markdown Writer](examples/editor/README.md) 位于 `examples/editor`，是类 Typora
+体验的实验版：当前支持源码/阅读模式、实时预览和格式工具栏；尚无段落原位编辑、
+跨模式统一撤销重做和自动保存。格式命令使用库的 `ApplyMarkdownCommand`，处理 UTF-16 选区。
+
+```powershell
+cmake -S examples/editor -B build-editor -DHUXERUI_HOME=/path/to/HuxerUI
+cmake --build build-editor --config Release --parallel
+.\build-editor\Release\markdown_editor.exe
+```
+
+根项目开启 examples 会同时构建两个 demo，Writer 输出为 `build/examples/editor/Release/markdown_editor.exe`。
 
 ## 构建
 

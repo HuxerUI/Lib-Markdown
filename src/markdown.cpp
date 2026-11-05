@@ -45,6 +45,8 @@ struct InlineBuilder {
       style.background = theme.highlight_background;
       break;
     case NodeKind::Code:
+    case NodeKind::InlineMath:
+    case NodeKind::DisplayMath:
       style.font = theme.code.font;
       style.foreground = theme.code.foreground;
       style.background = theme.code_background;
@@ -86,10 +88,36 @@ struct InlineBuilder {
 void ValidateStyle(const MarkdownStyle& theme) {
   for (const auto size : theme.heading_sizes)
     if (!std::isfinite(size) || size <= 0) throw std::invalid_argument("Markdown heading sizes must be positive and finite");
-  for (const auto value : {theme.block_spacing, theme.list_spacing, theme.indent, theme.code_padding, theme.corner_radius})
+  for (const auto value : {theme.block_spacing, theme.list_spacing, theme.indent, theme.code_padding,
+                           theme.corner_radius, theme.blank_line_height})
     if (!std::isfinite(value) || value < 0) throw std::invalid_argument("Markdown dimensions must be nonnegative and finite");
   if (!std::isfinite(theme.table_cell_width) || theme.table_cell_width <= 0)
     throw std::invalid_argument("Markdown table_cell_width must be positive and finite");
+}
+
+float BlockGap(const MarkdownNode& before, const MarkdownNode& after, float spacing) {
+  return before.kind == NodeKind::BlankLines || after.kind == NodeKind::BlankLines ? 0.0F : spacing;
+}
+
+View BlockColumn(std::vector<View> blocks, const std::vector<MarkdownNode>& nodes, float spacing) {
+  const bool explicit_blanks = std::any_of(nodes.begin(), nodes.end(),
+      [](const MarkdownNode& node) { return node.kind == NodeKind::BlankLines; });
+  if (!explicit_blanks)
+    return Column(std::move(blocks)).With(Spacing(spacing), CrossAlign(CrossAxisAlignment::Stretch));
+  std::vector<View> children;
+  for (std::size_t i = 0; i < blocks.size(); ++i) {
+    if (i) {
+      const auto gap = BlockGap(nodes[i - 1], nodes[i], spacing);
+      if (gap > 0) children.push_back(Column(std::vector<View>{}).With(Frame{.height = gap}));
+    }
+    children.push_back(std::move(blocks[i]));
+  }
+  return Column(std::move(children)).With(CrossAlign(CrossAxisAlignment::Stretch));
+}
+
+bool HasBlankLines(const MarkdownNode& node) {
+  if (node.kind == NodeKind::BlankLines) return true;
+  return std::any_of(node.children.begin(), node.children.end(), HasBlankLines);
 }
 
 class Renderer {
@@ -103,7 +131,7 @@ public:
   View Blocks(const MarkdownNode& parent, float spacing) const {
     std::vector<View> children;
     for (const auto& node : parent.children) children.push_back(Block(node));
-    return Column(std::move(children)).With(Spacing(spacing), CrossAlign(CrossAxisAlignment::Stretch));
+    return BlockColumn(std::move(children), parent.children, spacing);
   }
 
 private:
@@ -183,7 +211,15 @@ private:
     case NodeKind::Paragraph:
       if (options_.standalone_image_renderer && node.children.size() == 1 && node.children.front().kind == NodeKind::Image)
         return options_.standalone_image_renderer(node.children.front());
+      if (options_.standalone_math_renderer && node.children.size() == 1 &&
+          (node.children.front().kind == NodeKind::InlineMath || node.children.front().kind == NodeKind::DisplayMath))
+        return options_.standalone_math_renderer(node.children.front());
       return Paragraph(node, theme_.body);
+    case NodeKind::BlankLines: {
+      const auto height = static_cast<float>(node.blank_line_count) * theme_.blank_line_height;
+      if (!std::isfinite(height)) throw std::invalid_argument("Markdown blank line extent overflow");
+      return Column(std::vector<View>{}).With(Frame{.height = height});
+    }
     case NodeKind::CodeBlock:
       if (options_.code_block_renderer) return options_.code_block_renderer(node);
       return BindSelection(Text(node.text).Style(theme_.code), node)
@@ -249,6 +285,10 @@ struct VirtualBlock {
   }
 
   void Collect(const MarkdownNode& value, std::uint64_t& next_id) {
+    if (value.kind == NodeKind::BlankLines) {
+      if (!paragraphs.empty()) paragraphs.back().separator.append(value.blank_line_count, '\n');
+      return;
+    }
     switch (value.kind) {
     case NodeKind::Paragraph:
     case NodeKind::Heading:
@@ -292,9 +332,11 @@ public:
     for (auto i = prefix; i < nodes.size() - suffix; ++i)
       blocks[i] = std::make_shared<const VirtualBlock>(nodes[i], next_id);
     for (const auto& block : blocks) {
+      if (block->node.kind == NodeKind::BlankLines && !positions_.empty())
+        positions_.back().separator.append(block->node.blank_line_count, '\n');
       for (std::size_t i = 0; i < block->ids.size(); ++i) {
         indexes_.emplace(block->ids[i], positions_.size());
-        positions_.push_back({block, i});
+        positions_.push_back({block, i, block->paragraphs[i].separator});
       }
     }
   }
@@ -310,11 +352,15 @@ public:
   }
   TextSelectionBlock BlockAt(std::size_t index) const override {
     const auto& position = positions_.at(index);
-    return position.block->paragraphs[position.paragraph];
+    return {position.block->paragraphs[position.paragraph].text, position.separator};
   }
 
 private:
-  struct Position { std::shared_ptr<const VirtualBlock> block; std::size_t paragraph; };
+  struct Position {
+    std::shared_ptr<const VirtualBlock> block;
+    std::size_t paragraph;
+    std::string separator;
+  };
   std::vector<Position> positions_;
   std::unordered_map<TextBlockId, std::size_t> indexes_;
 };
@@ -350,6 +396,7 @@ MarkdownStyle MarkdownStyle::FromTheme(const ThemeSpec& theme) {
   result.highlight_background = theme.colors.primary_container;
   result.admonition_foreground = theme.colors.primary;
   result.admonition_background = theme.colors.surface_container;
+  result.blank_line_height = theme.typography.body_large * 1.25F;
   const float scale = theme.typography.body_large / 16.0F;
   for (auto& size : result.heading_sizes) size *= scale;
   return result;
@@ -365,7 +412,20 @@ View Markdown(MarkdownDocument document, MarkdownOptions options) {
   return Scope([document = std::move(document), options = std::move(options)] {
     const auto theme = options.style ? *options.style : MarkdownStyle::FromTheme(UseTheme());
     ValidateStyle(theme);
-    auto content = Renderer(options, theme, UseEvents()).Blocks(document.Root(), theme.block_spacing);
+    const auto events = UseEvents();
+    // Explicit blank nodes have no Text endpoint. Supply logical separators so
+    // selection/copy preserves their interior newlines in ordinary views as well.
+    if (options.selectable && HasBlankLines(document.Root())) {
+      auto state = UseState(std::make_shared<VirtualState>()).Get();
+      if (!state->snapshot || state->snapshot->document != document)
+        state->snapshot = std::make_shared<const VirtualSnapshot>(document, state->snapshot, state->next_id);
+      const auto snapshot = state->snapshot;
+      std::vector<View> children;
+      for (const auto& block : snapshot->blocks)
+        children.push_back(Renderer(options, theme, events, &block->bindings).RenderBlock(block->node));
+      return View(SelectionArea(BlockColumn(std::move(children), document.Root().children, theme.block_spacing)).Source(snapshot));
+    }
+    auto content = Renderer(options, theme, events).Blocks(document.Root(), theme.block_spacing);
     if (options.selectable) return View(SelectionArea(std::move(content)));
     return content;
   });
@@ -394,10 +454,13 @@ View VirtualizedMarkdown(MarkdownDocument document, MarkdownOptions options,
       const auto& block = snapshot->blocks[index];
       // Deferred item composition is essential: only realized rows build Text and
       // invoke render callbacks, even if the SDK inspects all item keys.
+      // SDK measured extents ignore zero. A subpixel floor lets empty/collapsed
+      // rows replace their old estimate instead of retaining an obsolete gap.
       return Scope([block, options, theme, events] {
         return Renderer(options, theme, events, options.selectable ? &block->bindings : nullptr)
             .RenderBlock(block->node);
-      }).With(Padding(EdgeInsets{0, 0, index + 1 < snapshot->blocks.size() ? theme.block_spacing : 0, 0}))
+      }).With(Frame{.min_height = 0.001F}, Padding(EdgeInsets{0, 0, index + 1 < snapshot->blocks.size() ?
+          BlockGap(block->node, snapshot->blocks[index + 1]->node, theme.block_spacing) : 0, 0}))
         .Key(block->id);
     }).EstimatedItemExtent(virtualization.estimated_block_extent).CacheExtent(virtualization.cache_extent);
     if (virtualization.scroll_controller) list = std::move(list).Controller(*virtualization.scroll_controller);

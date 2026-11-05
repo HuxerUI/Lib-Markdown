@@ -179,6 +179,11 @@ int main(int argc, char** argv) { return Run([&] {
   CHECK(ui.Find(UiSelector::Key("source-editor")).One().value == markdown_preview::Samples()[5].source);
   CHECK(ui.Find(UiSelector::Key("status")).One().text == "流式重放完成");
   CHECK(preview().Find(UiSelector::Text("Warning")).Exists());
+  ui.Find(UiSelector::Key("sample-6")).Tap();
+  CHECK(preview().Find(UiSelector::Key("custom-math")).Exists());
+  ui.Find(UiSelector::Key("custom-toggle")).Tap();
+  CHECK(!preview().Find(UiSelector::Key("custom-math")).Exists());
+  CHECK(preview().Find(UiSelector::Text("\\frac{a}{b}")).Exists());
   ui.SetWindowMetrics({.viewport = {480, 820}});
   ui.Pump();
   const auto source_bounds = ui.Find(UiSelector::Key("source-editor")).One().bounds;

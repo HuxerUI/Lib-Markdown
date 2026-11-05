@@ -43,7 +43,7 @@ auto document = session.Update(source);
 // MarkdownStream stream(parse) 使用同样配置；Markdown / VirtualizedMarkdown 接收快照。
 ```
 
-默认解析不启用这些扩展。示例程序的 DemoParseOptions 显式开启六项；这不是库的隐式方言切换。
+默认解析不启用这些扩展。示例程序的 DemoParseOptions 显式开启六项及后续新增的 math/空行选项；这不是库的隐式方言切换。
 HTML 仍按字面文字显示，不启用 MD4C HTML 输出，不接入网络下载。
 
 ## 显示与交互
@@ -107,15 +107,16 @@ return Markdown(document)
 | CommonMark、GFM 表格/任务/删除线/自动链接 | 已接入 |
 | highlight / insert / underline / Wiki / 提示块 / 脚注 | 本轮完成 |
 | 普通换行显示为硬换行 | 已通过 SoftBreakMode 接入，无需暴露原始 MD4C flag |
-| 公式语法（LATEXMATHSPANS） | 下一批先接 AST，再确定原生行内/块级公式排版后端；不把源码展示当公式排版 |
+| 公式语法（LATEXMATHSPANS） | 已接 AST、等宽源码回退、独占公式自定义渲染接口；完整公式排版后端仍待实现 |
 | 上下标（SUPERSCRIPTS/SUBSCRIPTS） | SDK 当前 TextSpanStyle 没有基线偏移，需补底层排版能力再承诺显示支持 |
 | 剧透（SPOILERS） | 需定义隐藏、显露、键盘/辅助功能与复制行为，不能只加背景色 |
-| 空行保留（PRESERVEBLANKLINES） | 编辑器基础阶段处理，配合源码位置、空段落和序列化契约 |
+| 空行保留（PRESERVEBLANKLINES） | 已接 BlankLines/count、布局和正文间复制分隔符；不代表源码无损往返 |
 | 宽松标题、禁用缩进代码、折叠空白 | 可选方言/归一化行为，暂不扩充公开选项，先确定实际需求 |
 | HTML 输出/执行 | 不在原生控件范围；不因扩展语法而开启 |
 
 MD4C 的 syntax 字段是保留字段，不是语法插件接口。未来自定义语法另行设计，保持第三方代码
-与应用扩展层分离。类 Typora demo 的编辑器模型、事务和源码映射为后续独立阶段，本轮未新增该 demo。
+与应用扩展层分离。后续阶段已新增独立 [Writer demo](../examples/editor/README.md)，当前为源码/阅读
+双模式，原位编辑、统一事务和源码映射仍待实现。新增能力见[公式与编辑基础](math-and-editing.md)。
 
 ## 验证
 
