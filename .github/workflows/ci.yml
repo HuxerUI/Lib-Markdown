@@ -1,0 +1,42 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  parser:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure standalone parser
+        run: cmake -S . -B build -DHUXERUI_MARKDOWN_BUILD_VIEW=OFF -DHUXERUI_MARKDOWN_BUILD_TESTS=ON
+      - name: Build
+        run: cmake --build build --config Release --parallel 2
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+  native:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out verified HuxerUI revision
+        uses: actions/checkout@v4
+        with:
+          repository: HuxerUI/HuxerUI
+          ref: cadb1696cfa7b87d9d2d316b3ecba07b85a46962
+          path: .cache/HuxerUI
+      - name: Configure native component and preview
+        run: cmake -S . -B build -DHUXERUI_HOME="${{ github.workspace }}/.cache/HuxerUI" -DHUXERUI_MARKDOWN_BUILD_TESTS=ON -DHUXERUI_BUILD_TESTING_LIBRARY=ON -DHUXERUI_MARKDOWN_BUILD_EXAMPLES=ON
+      - name: Build
+        run: cmake --build build --config Release --parallel 2
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
