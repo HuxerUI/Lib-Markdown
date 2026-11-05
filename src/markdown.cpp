@@ -1,4 +1,6 @@
 #include <huxerui/markdown.h>
+#include <huxerui/animation.h>
+#include <huxerui/task.h>
 
 #include <algorithm>
 #include <cmath>
@@ -123,8 +125,8 @@ bool HasBlankLines(const MarkdownNode& node) {
 class Renderer {
 public:
   Renderer(const MarkdownOptions& options, MarkdownStyle theme, EventEmitter events,
-           const std::unordered_map<const MarkdownNode*, TextBlockId>* selection = nullptr)
-      : options_(options), theme_(std::move(theme)), events_(std::move(events)), selection_(selection) {}
+           const std::unordered_map<const MarkdownNode*, TextBlockId>* selection = nullptr, bool interactive = true)
+      : options_(options), theme_(std::move(theme)), events_(std::move(events)), selection_(selection), interactive_(interactive) {}
 
   View RenderBlock(const MarkdownNode& node) const { return Block(node); }
 
@@ -142,6 +144,11 @@ private:
 
   View Paragraph(const MarkdownNode& node, TextStyle style, TextAlign alignment = TextAlign::Leading) const {
     auto inline_text = detail::BuildInline(node, theme_, options_.link_policy);
+    if (!interactive_) {
+      const auto styles = inline_text.text.StyleRanges();
+      auto text = AttributedText::FromRanges(inline_text.text.PlainText(), {styles.begin(), styles.end()});
+      return Text(std::move(text)).Style(std::move(style)).Align(alignment);
+    }
     return BindSelection(Text(std::move(inline_text.text)).Style(std::move(style)).Align(alignment), node)
         .On<TextEvents::LinkActivated>([events = events_, links = std::move(inline_text.links)](const TextLinkActivation& event) {
           for (const auto& link : links) {
@@ -269,6 +276,7 @@ private:
   MarkdownStyle theme_;
   EventEmitter events_;
   const std::unordered_map<const MarkdownNode*, TextBlockId>* selection_;
+  bool interactive_;
 };
 
 // Owned block records avoid retaining an entire historical AST for each reused
@@ -370,6 +378,81 @@ struct VirtualState {
   std::uint64_t next_id = 0;
 };
 
+struct EditingPresentation { using Value = bool; };
+
+bool EmptyForEditing(const MarkdownDocument& document) {
+  const auto& children = document.Root().children;
+  return std::all_of(children.begin(), children.end(), [](const MarkdownNode& node) { return node.kind == NodeKind::BlankLines; });
+}
+
+// The same TextField stays mounted while its presentation changes. In reading
+// presentation it is a transparent input backing beneath noninteractive Markdown;
+// a real pointer/Tab focus enters the native client without synthetic input or a
+// second click. Exact glyph-to-source caret mapping is deliberately not promised.
+class EditableBlockLayout final : public Layout<EditableBlockLayout> {
+public:
+  using Layout::Layout;
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
+    auto& input = node.ChildAt(0);
+    auto& preview = node.ChildAt(1);
+    const bool editing = node.LayoutValueOr<EditingPresentation>(false);
+    const auto rendered = context.Measure(preview, constraints.LooseHeight());
+    const auto field = context.Measure(input, editing ? constraints.LooseHeight() :
+        constraints.LooseHeight().TightHeight(std::max(24.0F, rendered.height)));
+    LayoutResult result;
+    result.Place(input, {0, 0}).Place(preview, {0, editing ? field.height + node.Spacing() : 0});
+    return result.SetSize(constraints.Constrain({std::max(field.width, rendered.width),
+        editing ? field.height + node.Spacing() + rendered.height : std::max(field.height, rendered.height)}));
+  }
+};
+
+struct BlockEditorState {
+  ParseOptions parse_options;
+  MarkdownBlockEditSession session;
+  VirtualState layout;
+  MarkdownDocument fragment;
+  std::string fragment_text;
+  std::uint64_t focus_epoch = 0;
+  bool empty_mode;
+  explicit BlockEditorState(const TextEditingValue& value, ParseOptions options)
+      : parse_options(options), session(value.text, options), empty_mode(EmptyForEditing(session.Document())) {}
+
+  bool Activate(MarkdownDocument layout_document, std::size_t index) {
+    if (session.LayoutDocument() != layout_document) return false; // Stale realized row.
+    if (session.EditingBlock() == index) return true;
+    auto range = layout_document.TopLevelSourceRange(index);
+    if (!range) return false;
+    auto start = range->start_byte;
+    if (const auto active = session.EditingBlock()) {
+      const auto old = *layout_document.TopLevelSourceRange(*active);
+      if (start >= old.end_byte)
+        start = start - (old.end_byte - old.start_byte) + session.EditingValue().text.size();
+      session.EndEdit();
+    }
+    for (std::size_t i = 0; i < session.Document().Root().children.size(); ++i) {
+      const auto candidate = session.Document().TopLevelSourceRange(i);
+      if (candidate && candidate->start_byte == start) {
+        session.BeginEdit(i);
+        ++focus_epoch;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  TextEditingValue WholeValue() const {
+    auto result = TextEditingValue::FromText(std::string(session.Source()));
+    if (const auto block = session.EditingBlock()) {
+      const auto range = *session.LayoutDocument().TopLevelSourceRange(*block);
+      const auto prefix = AttributedText(std::string(session.Source().substr(0, range.start_byte))).Length();
+      const auto& local = session.EditingValue();
+      result.selection = {prefix + local.selection.anchor, prefix + local.selection.active, local.selection.affinity};
+      if (local.composition) result.composition = TextRange{prefix + local.composition->start, prefix + local.composition->end};
+    }
+    return result;
+  }
+};
+
 } // namespace
 
 namespace detail {
@@ -465,6 +548,135 @@ View VirtualizedMarkdown(MarkdownDocument document, MarkdownOptions options,
     }).EstimatedItemExtent(virtualization.estimated_block_extent).CacheExtent(virtualization.cache_extent);
     if (virtualization.scroll_controller) list = std::move(list).Controller(*virtualization.scroll_controller);
     if (options.selectable) return View(SelectionArea(std::move(list)).Source(snapshot));
+    return View(std::move(list));
+  });
+}
+
+View MarkdownEditor(TextEditingValue value, MarkdownEditorOptions options) {
+  // Reuse TextField's UTF-8/scalar validation before mounting anything.
+  const AttributedText text(value.text);
+  (void)text.TextInRange({0, value.selection.anchor});
+  (void)text.TextInRange({0, value.selection.active});
+  if (value.composition) (void)text.TextInRange(*value.composition);
+  if (value.selection.affinity != TextAffinity::Upstream && value.selection.affinity != TextAffinity::Downstream)
+    throw std::invalid_argument("Invalid Markdown editor selection affinity");
+  if (options.markdown_options.style) ValidateStyle(*options.markdown_options.style);
+  const auto& virtualization = options.virtualization;
+  if (!std::isfinite(virtualization.estimated_block_extent) || virtualization.estimated_block_extent <= 0 ||
+      !std::isfinite(virtualization.cache_extent) || virtualization.cache_extent < 0)
+    throw std::invalid_argument("Invalid Markdown editor virtualization extents");
+  return Scope([value = std::move(value), options = std::move(options)]() -> View {
+    const auto& virtualization = options.virtualization;
+    auto holder = UseState(std::shared_ptr<BlockEditorState>{});
+    if (!holder.Get() || holder.Get()->parse_options != options.parse_options) {
+      if (holder.Get() && holder.Get()->session.EditingValue().composition)
+        throw std::logic_error("Finish IME composition before changing Markdown editor parsing options");
+      holder = std::make_shared<BlockEditorState>(value, options.parse_options);
+    }
+    const auto state = holder.Get();
+    auto revision = UseState(std::uint64_t{0});
+    (void)revision.Get();
+    const auto events = UseEvents();
+    const auto tasks = UseTaskScope();
+    if (state->session.Source() != value.text) {
+      state->session.UpdateSource(value.text);
+      ++state->focus_epoch;
+    }
+    auto theme = options.markdown_options.style ? *options.markdown_options.style : MarkdownStyle::FromTheme(UseTheme());
+    ValidateStyle(theme);
+    auto render_options = options.markdown_options;
+    render_options.selectable = false;
+    const auto report = [events](const std::exception& error) {
+      const std::string message = error.what();
+      events.Emit<MarkdownEditorEvents::Error>(message);
+    };
+    if (state->empty_mode || EmptyForEditing(state->session.Document())) {
+      state->empty_mode = true;
+      View input = TextField(value).LineLimits(TextFieldLineLimits::MultiLine(1)).VerticalAlign(TextVerticalAlign::Top)
+          .OnChanged([=](const TextEditingValue& next) mutable {
+            try {
+              state->session.UpdateSource(next.text);
+              events.Emit<MarkdownEditorEvents::Changed>(next);
+              revision = revision.Get() + 1;
+            } catch (const std::exception& error) { report(error); }
+          }).On<ViewEvents::FocusChanged>([=](bool focused) mutable {
+            if (!focused && !EmptyForEditing(state->session.Document())) {
+              tasks.Post([=]() mutable { state->empty_mode = false; revision = revision.Get() + 1; });
+            }
+          }).Key("markdown-empty-input");
+      return ScrollView(Column{
+        std::move(input),
+        options.live_preview ? Renderer(render_options, theme, events, nullptr, false)
+            .Blocks(state->session.Document().Root(), theme.block_spacing).Key("markdown-block-preview") :
+            View(Column(std::vector<View>{})),
+      }.With(Spacing(8.0F), CrossAlign(CrossAxisAlignment::Stretch)));
+    }
+    const auto layout_document = state->session.LayoutDocument();
+    if (!state->layout.snapshot || state->layout.snapshot->document != layout_document)
+      state->layout.snapshot = std::make_shared<const VirtualSnapshot>(layout_document, state->layout.snapshot, state->layout.next_id);
+    const auto snapshot = state->layout.snapshot;
+    auto list = VirtualList(snapshot->blocks.size(), [=](std::size_t index) -> View {
+      const auto block = snapshot->blocks[index];
+      return Scope([=]() -> View {
+        (void)revision.Get();
+        const auto range = layout_document.TopLevelSourceRange(index);
+        if (!range) return Renderer(render_options, theme, events).RenderBlock(block->node);
+        const bool active = state->session.LayoutDocument() == layout_document && state->session.EditingBlock() == index;
+        auto local = active ? state->session.EditingValue() : TextEditingValue::FromText(std::string(
+            state->session.LayoutSource().substr(range->start_byte, range->end_byte - range->start_byte)));
+        // Keep link hit targets out of editable rendered overlays: clicking any
+        // glyph enters the backing field instead of navigating.
+        View preview = Renderer(render_options, theme, events, nullptr, false).RenderBlock(block->node);
+        if (active) {
+          if (options.live_preview) {
+            auto fragment_options = options.parse_options;
+            fragment_options.source_ranges = false;
+            if (state->fragment_text != local.text || state->fragment == MarkdownDocument{}) {
+              state->fragment = ParseMarkdown(local.text, fragment_options);
+              state->fragment_text = local.text;
+            }
+            preview = Renderer(render_options, theme, events, nullptr, false)
+                .Blocks(state->fragment.Root(), theme.block_spacing).Key("markdown-block-preview");
+          } else preview = Column(std::vector<View>{});
+        }
+        auto input = TextField(local).Variant(TextFieldVariant::Standard)
+            .LineLimits(TextFieldLineLimits::MultiLine(1)).VerticalAlign(TextVerticalAlign::Top)
+            .OnChanged([=](const TextEditingValue& next) mutable {
+              try {
+                if (!state->Activate(layout_document, index)) return;
+                state->session.UpdateEdit(next);
+                const auto whole = state->WholeValue();
+                events.Emit<MarkdownEditorEvents::Changed>(whole);
+              } catch (const std::exception& error) { report(error); }
+              revision = revision.Get() + 1;
+            }).On<ViewEvents::FocusChanged>([=](bool focused) mutable {
+              try {
+                if (focused) {
+                  (void)state->Activate(layout_document, index);
+                  revision = revision.Get() + 1;
+                } else {
+                  const auto epoch = state->focus_epoch;
+                  // Defer closure so focus can first enter another backing field.
+                  tasks.Post([=]() mutable {
+                    if (state->focus_epoch != epoch || !state->session.EditingBlock() || state->session.EditingValue().composition) return;
+                    try { state->session.EndEdit(); ++state->focus_epoch; revision = revision.Get() + 1; }
+                    catch (const std::exception& error) { report(error); }
+                  });
+                }
+              } catch (const std::exception& error) { report(error); }
+            }).On<ViewEvents::KeyIntercept>([=](const KeyEvent& event) mutable {
+              if (event.type != KeyEventType::Down || event.key != Key::Enter || !event.modifiers.control ||
+                  state->session.EditingValue().composition) return false;
+              try { state->session.EndEdit(); ++state->focus_epoch; revision = revision.Get() + 1; }
+              catch (const std::exception& error) { report(error); }
+              return true;
+            }).With(Opacity(active ? 1.0F : 0.0F)).Key("markdown-block-input");
+        return EditableBlockLayout{std::move(input), std::move(preview)}
+            .LayoutValue<EditingPresentation>(active).With(Spacing(active && options.live_preview ? 8.0F : 0.0F));
+      }).With(Frame{.min_height = 0.001F}, Padding(EdgeInsets{0, 0, index + 1 < snapshot->blocks.size() ?
+          BlockGap(block->node, snapshot->blocks[index + 1]->node, theme.block_spacing) : 0, 0})).Key(block->id);
+    }).EstimatedItemExtent(virtualization.estimated_block_extent).CacheExtent(virtualization.cache_extent);
+    if (virtualization.scroll_controller) list = std::move(list).Controller(*virtualization.scroll_controller);
     return View(std::move(list));
   });
 }

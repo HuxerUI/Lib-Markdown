@@ -69,6 +69,13 @@ enum class SoftBreakMode {
   LineBreak,
 };
 
+/// Half-open UTF-8 byte range in the exact source used to create a snapshot.
+struct MarkdownSourceRange {
+  std::size_t start_byte = 0;
+  std::size_t end_byte = 0;
+  bool operator==(const MarkdownSourceRange&) const = default;
+};
+
 /// Synchronous parse configuration. No UI configuration or thread scheduling.
 struct ParseOptions {
   bool tables = true;
@@ -87,6 +94,9 @@ struct ParseOptions {
   bool math = false;
   /// Emit BlankLines nodes for runs reported by MD4C; not lossless source retention.
   bool preserve_blank_lines = false;
+  /// Collect conservative, verified ranges for editable root paragraphs/headings.
+  /// Adds fragment parsing work; unavailable/ambiguous blocks have no range.
+  bool source_ranges = false;
   /// Does not change explicit hard breaks or newlines inside code blocks/spans.
   SoftBreakMode soft_break_mode = SoftBreakMode::Space;
   /// Positive UTF-8 input-byte limit, default 8 MiB; exceeding it throws length_error.
@@ -115,12 +125,16 @@ public:
   [[nodiscard]] const MarkdownNode& Root() const noexcept;
   /// Returns owned UTF-8 text without markup.
   [[nodiscard]] std::string PlainText() const;
+  /// Optional source interval including Markdown markers, excluding the final EOL.
+  /// Only when source_ranges was enabled. Nested/unsupported/ambiguous blocks
+  /// return nullopt. Indices address Root().children; invalid indices throw.
+  [[nodiscard]] std::optional<MarkdownSourceRange> TopLevelSourceRange(std::size_t index) const;
   /// Snapshot identity equality; separately parsed equivalent ASTs need not be equal.
   bool operator==(const MarkdownDocument&) const noexcept = default;
 
 private:
   struct Storage;
-  explicit MarkdownDocument(MarkdownNode root);
+  explicit MarkdownDocument(MarkdownNode root, std::vector<std::optional<MarkdownSourceRange>> ranges = {});
   std::shared_ptr<const Storage> storage_;
   friend MarkdownDocument ParseMarkdown(std::string_view, ParseOptions);
   friend class MarkdownParseSession;
@@ -136,8 +150,9 @@ private:
 /// How the latest successful session update produced its snapshot.
 enum class MarkdownParseMode { Unchanged, Incremental, Full };
 
-/// MD4C work for one update, not total CPU/memory work. Source validation/comparison
-/// and copying retained AST blocks are separate from parsed_bytes.
+/// Primary document parse work for one update, not total CPU/memory work.
+/// Optional source-range fragment verification, source validation/comparison and
+/// copying retained AST blocks are separate from parsed_bytes.
 struct MarkdownParseStats {
   MarkdownParseMode mode = MarkdownParseMode::Unchanged;
   std::size_t parsed_bytes = 0;

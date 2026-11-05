@@ -3,6 +3,7 @@
 #include <array>
 #include <functional>
 #include <optional>
+#include <utility>
 
 #include <huxerui/markdown/document.h>
 #include <huxerui/markdown/editing.h>
@@ -144,5 +145,36 @@ struct MarkdownVirtualizationOptions {
                                      MarkdownVirtualizationOptions virtualization = {});
 [[nodiscard]] View VirtualizedMarkdown(std::string_view source, MarkdownOptions options = {},
                                      MarkdownVirtualizationOptions virtualization = {});
+
+/// First-stage block editor: verified root paragraphs/headings are backed by a
+/// retained native TextField. Focus reveals that block's Markdown source; blur
+/// restores its formatted content. Other structures remain rendered/read-only.
+/// The active block can split/change syntax without remounting its input client.
+struct MarkdownEditorOptions {
+  ParseOptions parse_options;
+  MarkdownOptions markdown_options;
+  MarkdownVirtualizationOptions virtualization;
+  /// Render the active source fragment below its input, synchronously on changes.
+  /// Fragment preview has local reference scope; the completed document uses full scope.
+  bool live_preview = true;
+};
+
+struct MarkdownEditorEvents {
+  /// Full source plus UTF-16 selection/composition in whole-source coordinates.
+  /// Accept the complete value in the caller's controlled state, as for TextField.
+  struct Changed : Event<void(const TextEditingValue&)> {};
+  /// An edit was rejected; the last valid value is retained. Borrowed message.
+  struct Error : Event<void(const std::string&)> {};
+};
+
+/// Owns virtual scrolling and requires bounded height. Click/Tab into a paragraph
+/// to edit; blur or Ctrl+Enter finishes it (never while IME composition is active).
+/// The native editor owns the active block's undo history only. Cross-block undo,
+/// exact rendered-glyph caret mapping and nested/table editing are not yet provided.
+/// An empty document presents one native source field so writing can begin.
+[[nodiscard]] View MarkdownEditor(TextEditingValue value, MarkdownEditorOptions options = {});
+[[nodiscard]] inline View MarkdownEditor(const State<TextEditingValue>& value, MarkdownEditorOptions options = {}) {
+  return MarkdownEditor(value.Get(), std::move(options));
+}
 
 } // namespace huxerui::markdown

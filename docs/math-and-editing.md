@@ -64,6 +64,7 @@ auto next = ApplyMarkdownCommand(value, MarkdownEditCommand::Bold);
 ## 两个 demo
 
 - [Playground](../examples/preview/README.md)：七组能力样例，新增公式/空行和源码渲染卡片。
-- [Writer](../examples/editor/README.md)：独立 `markdown_editor`，源码/阅读双模式及格式工具栏。
+- [Writer](../examples/editor/README.md)：独立 `markdown_editor`，段落/标题原位编辑、实时预览及全篇源码工具栏。
 
-两个 demo 都复用本库解析与渲染。Writer 当前明确标为实验版，尚无段落原位编辑或跨模式统一撤销重做。
+两个 demo 都复用本库解析与渲染。Writer 使用库的 MarkdownEditor，当前为块级原位编辑首版，
+精确字形光标映射和跨块/跨模式统一撤销重做尚待实现，见[块级编辑](block-editing.md)。

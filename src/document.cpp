@@ -108,6 +108,7 @@ struct Builder {
   std::vector<MarkdownNode*> stack{&root};
   std::string_view source;
   std::vector<Restart> restarts;
+  std::vector<std::optional<MarkdownSourceRange>> ranges;
   bool first_content = true;
   ParseOptions options;
   std::exception_ptr error;
@@ -123,6 +124,20 @@ struct Builder {
     node.kind = kind;
     stack.push_back(&node);
     return node;
+  }
+
+  void RecordSource(const char* text, std::size_t size) {
+    if (!options.source_ranges || stack.size() < 2 || !size) return;
+    const auto kind = stack[1]->kind;
+    if (kind != NodeKind::Paragraph && kind != NodeKind::Heading) return;
+    const auto base = reinterpret_cast<std::uintptr_t>(source.data());
+    const auto pointer = reinterpret_cast<std::uintptr_t>(text);
+    // MD4C also emits synthetic text (breaks, replacements, normalized code).
+    if (pointer < base || pointer - base >= source.size() || size > source.size() - (pointer - base)) return;
+    auto& range = ranges.back();
+    const auto start = static_cast<std::size_t>(pointer - base);
+    if (!range) range = MarkdownSourceRange{start, start + size};
+    else { range->start_byte = std::min(range->start_byte, start); range->end_byte = std::max(range->end_byte, start + size); }
   }
 
   void RecordRestart(MD_TEXTTYPE type, const char* text) {
@@ -193,7 +208,10 @@ int EnterBlock(MD_BLOCKTYPE type, void* detail, void* context) noexcept {
     default: throw std::runtime_error("Unexpected Markdown block");
     }
     auto& node = b.Push(kind);
-    if (b.stack.size() == 2) b.first_content = true;
+    if (b.stack.size() == 2) {
+      b.first_content = true;
+      if (b.options.source_ranges) b.ranges.emplace_back();
+    }
     if (type == MD_BLOCK_BLANK)
       node.blank_line_count = static_cast<MD_BLOCK_BLANK_DETAIL*>(detail)->line_count;
     if (type == MD_BLOCK_ADMONITION) {
@@ -311,6 +329,7 @@ int TextCallback(MD_TEXTTYPE type, const MD_CHAR* data, MD_SIZE size, void* cont
   auto& b = *static_cast<Builder*>(context);
   return b.Guard([&] {
     b.RecordRestart(type, data);
+    b.RecordSource(data, size);
     std::string text;
     switch (type) {
     case MD_TEXT_ENTITY: text = DecodeEntity({data, size}); break;
@@ -367,6 +386,7 @@ void ValidateInput(std::string_view source, const ParseOptions& options) {
 struct ParsedSource {
   MarkdownNode root;
   std::vector<Builder::Restart> restarts;
+  std::vector<std::optional<MarkdownSourceRange>> ranges;
 };
 
 ParsedSource ParseValidatedSource(std::string_view source, const ParseOptions& options) {
@@ -395,23 +415,60 @@ ParsedSource ParseValidatedSource(std::string_view source, const ParseOptions& o
   const int result = md_parse(source.empty() ? "" : source.data(), static_cast<MD_SIZE>(source.size()), &parser, &builder);
   if (builder.error) std::rethrow_exception(builder.error);
   if (result != 0) throw std::runtime_error("MD4C could not parse Markdown");
-  return {std::move(builder.root), std::move(builder.restarts)};
+  if (options.source_ranges) {
+    auto fragment_options = options;
+    fragment_options.source_ranges = false;
+    for (std::size_t i = 0; i < builder.ranges.size(); ++i) {
+      auto& range = builder.ranges[i];
+      if (!range) continue;
+      auto begin = range->start_byte;
+      while (begin && source[begin - 1] != '\r' && source[begin - 1] != '\n') --begin;
+      if (!begin && source.starts_with("\xEF\xBB\xBF")) begin = 3;
+      auto end = source.find_first_of("\r\n", range->end_byte - 1);
+      if (end == std::string_view::npos) end = source.size();
+      const auto matches = [&](std::size_t last) {
+        try {
+          const auto parsed = ParseValidatedSource(source.substr(begin, last - begin), fragment_options);
+          return parsed.root.children.size() == 1 && parsed.root.children.front() == builder.root.children[i];
+        } catch (const std::length_error&) { return false; } // Isolated syntax can have a different depth.
+      };
+      bool verified = matches(end);
+      // Setext headings have a marker-only line after their inline content.
+      if (!verified && builder.root.children[i].kind == NodeKind::Heading && end < source.size()) {
+        auto next = end + 1;
+        if (source[end] == '\r' && next < source.size() && source[next] == '\n') ++next;
+        const auto line_end = source.find_first_of("\r\n", next);
+        end = line_end == std::string_view::npos ? source.size() : line_end;
+        verified = matches(end);
+      }
+      if (verified) range = MarkdownSourceRange{begin, end};
+      else range.reset(); // Never guess across context-dependent or synthetic content.
+    }
+  }
+  return {std::move(builder.root), std::move(builder.restarts), std::move(builder.ranges)};
 }
 
 } // namespace
 
 struct MarkdownDocument::Storage {
   MarkdownNode root;
-  explicit Storage(MarkdownNode value) : root(std::move(value)) {}
+  std::vector<std::optional<MarkdownSourceRange>> ranges;
+  explicit Storage(MarkdownNode value, std::vector<std::optional<MarkdownSourceRange>> positions = {})
+      : root(std::move(value)), ranges(std::move(positions)) {}
 };
 
 MarkdownDocument::MarkdownDocument() {
   static const auto empty = std::make_shared<const Storage>(MarkdownNode{.kind = NodeKind::Document});
   storage_ = empty;
 }
-MarkdownDocument::MarkdownDocument(MarkdownNode root) : storage_(std::make_shared<const Storage>(std::move(root))) {}
+MarkdownDocument::MarkdownDocument(MarkdownNode root, std::vector<std::optional<MarkdownSourceRange>> ranges)
+    : storage_(std::make_shared<const Storage>(std::move(root), std::move(ranges))) {}
 const MarkdownNode& MarkdownDocument::Root() const noexcept { return storage_->root; }
 std::string MarkdownDocument::PlainText() const { return markdown::PlainText(Root()); }
+std::optional<MarkdownSourceRange> MarkdownDocument::TopLevelSourceRange(std::size_t index) const {
+  if (index >= Root().children.size()) throw std::out_of_range("Markdown block index");
+  return storage_->ranges.empty() ? std::nullopt : storage_->ranges.at(index);
+}
 std::string PlainText(const MarkdownNode& node) {
   std::string out;
   CollectText(node, out);
@@ -420,7 +477,8 @@ std::string PlainText(const MarkdownNode& node) {
 
 MarkdownDocument ParseMarkdown(std::string_view source, ParseOptions options) {
   ValidateInput(source, options);
-  return MarkdownDocument(std::move(ParseValidatedSource(source, options).root));
+  auto parsed = ParseValidatedSource(source, options);
+  return MarkdownDocument(std::move(parsed.root), std::move(parsed.ranges));
 }
 
 struct MarkdownParseSession::Impl {
@@ -478,7 +536,17 @@ MarkdownDocument MarkdownParseSession::Update(std::string_view source) {
     restart.block += retained;
     restarts.push_back(restart);
   }
-  MarkdownDocument next(std::move(parsed.root));
+  if (impl_->options.source_ranges) {
+    std::vector<std::optional<MarkdownSourceRange>> ranges;
+    ranges.reserve(parsed.root.children.size());
+    for (std::size_t i = 0; i < retained; ++i) ranges.push_back(impl_->document.TopLevelSourceRange(i));
+    for (auto range : parsed.ranges) {
+      if (range) { range->start_byte += restart_byte; range->end_byte += restart_byte; }
+      ranges.push_back(range);
+    }
+    parsed.ranges = std::move(ranges);
+  }
+  MarkdownDocument next(std::move(parsed.root), std::move(parsed.ranges));
   const MarkdownParseStats stats{
     retained ? MarkdownParseMode::Incremental : MarkdownParseMode::Full,
     owned_source.size() - restart_byte, retained, next.Root().children.size(),

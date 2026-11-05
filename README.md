@@ -19,6 +19,7 @@ CommonMark parser, configurable GFM extensions, and ordinary declarative views.
 - Immutable documents that can be parsed on a worker and reused across recompositions
 - Stateful incremental parsing with UTF-8 edits, safe prefix reuse and parse statistics
 - Arbitrary-byte UTF-8 streaming and optional measured top-level block virtualization
+- Verified source ranges, block edit sessions and a virtualized native MarkdownEditor
 - Vendored MIT-licensed MD4C; no runtime download, WebView, JavaScript, or HTML rendering
 
 The component uses HuxerUI's platform-neutral views and supports its Windows,
@@ -251,10 +252,12 @@ With Visual Studio, launch `build-preview/Release/markdown_preview.exe`; keep it
 artifact after its standalone build and interaction tests pass.
 
 The separate [Markdown Writer](examples/editor/README.md) is the experimental
-Typora-inspired editing demo. Its first stage offers source/reading modes, optional
-live preview and a formatting toolbar using the library's `ApplyMarkdownCommand`.
-It preserves UTF-16 selections and rejects formatting during active IME composition.
-In-place paragraph editing and shared undo history remain future work.
+Typora-inspired editing demo. Click a root paragraph/heading to edit its source in
+place with immediate block-local preview; blur or Ctrl+Enter restores formatting.
+The library's `MarkdownEditor` retains the active native input through syntax
+changes and IME composition. Full-source mode and its formatting toolbar remain
+available for other structures. This is an initial block editor; exact rendered
+caret mapping and shared undo history remain future work. See [block editing](docs/block-editing.md).
 
 ```sh
 cmake -S examples/editor -B build-editor -DHUXERUI_HOME=/path/to/HuxerUI

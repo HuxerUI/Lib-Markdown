@@ -44,8 +44,12 @@ Public API normalization; rebuild the library and applications together. See
 - Add BlankLines/count parsing, configurable spacing and interior logical copy
   separators in ordinary and virtual views, with differential edit/stream tests.
 - Add pure UTF-16-aware ApplyMarkdownCommand formatting operations and the separate
-  experimental Writer demo with source/reading modes; paragraph in-place editing
-  and shared undo history are not implemented. Build/test both apps independently.
+  experimental Writer demo with a full-source mode. Build/test both apps independently.
+- Add opt-in verified top-level source ranges, MarkdownBlockEditSession and
+  MarkdownEditor for virtualized paragraph/heading in-place source editing with
+  synchronous local preview. Keep the active native client through IME and block
+  splits, and preserve source outside the edited interval. Writer uses the editor.
+  Exact rendered caret mapping and unified cross-block undo remain future work.
 
 No release tag has been created. Default syntax remains unchanged; new extensions
 are explicitly enabled. Demo parsing enables the optional extensions.

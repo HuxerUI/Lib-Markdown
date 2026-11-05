@@ -47,7 +47,7 @@ auto stats = parser.LastParseStats();
 | 字段 | 含义 |
 | --- | --- |
 | `mode` | `Unchanged`、`Incremental` 或 `Full` |
-| `parsed_bytes` | 本次实际交给 MD4C 的 UTF-8 字节数 |
+| `parsed_bytes` | 本次文档主解析交给 MD4C 的 UTF-8 字节数，不含可选源码区间的片段验证解析 |
 | `reused_blocks` | 免于重新解析的顶层块数；不变输入时为全部块 |
 | `total_blocks` | 新快照的顶层块数 |
 

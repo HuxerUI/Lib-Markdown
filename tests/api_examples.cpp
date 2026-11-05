@@ -82,4 +82,10 @@ View MathSource(std::string_view source) {
 TextEditingValue FormatSelection(TextEditingValue value) {
   return ApplyMarkdownCommand(value, MarkdownEditCommand::Bold);
 }
+
+View BlockEditor() {
+  auto value = UseState(TextEditingValue::FromText("# Title\n\nWrite here."));
+  return MarkdownEditor(value, {.parse_options = {.math = true}, .live_preview = true})
+      .On<MarkdownEditorEvents::Changed>([value](const TextEditingValue& next) mutable { value = next; });
+}
 } // namespace markdown_examples

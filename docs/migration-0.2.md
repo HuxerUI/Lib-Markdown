@@ -156,6 +156,8 @@ NodeKind numeric values are not a serialization ABI. Rebuild all consumers and
 update exhaustive node visitors; no compatibility aliases are provided.
 Additional opt-in math/blank-line support and UTF-16 source format commands are
 documented in [math and editing](math-and-editing.md). The separate Writer demo
-is experimental source/reading mode, with in-place editing still pending.
+now uses the experimental MarkdownEditor for root paragraph/heading in-place source
+editing and live block preview. See [block editing](block-editing.md) for source
+ranges, controlled values and current caret/history limitations.
 Compiled target-API examples are available in
 [tests/api_examples.cpp](../tests/api_examples.cpp).

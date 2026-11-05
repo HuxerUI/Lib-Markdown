@@ -10,15 +10,15 @@ using namespace huxerui::markdown;
 
 const std::string initial_source = R"md(# 开始写作
 
-这是类 Typora 编辑体验的开发 demo。当前支持源码与阅读模式，原位编辑仍在后续阶段。
+这是类 Typora 编辑体验的开发 demo。点击段落或标题即可原位编辑，输入时会实时显示排版预览。
 
 ## 试一试
 
-点击「编辑源码」，选中文字后使用工具栏添加 **粗体**、*斜体* 或 `代码`。
+点击这一段试着输入 **粗体**、*斜体* 或 `代码`，点击其他位置或按 Ctrl+Enter 完成编辑。
 
 - 完整保存 TextEditingValue 的选区与输入法状态
 - 连续输入时每 120 ms 合并更新预览
-- 阅读模式使用顶层块虚拟化
+- 原位编辑使用顶层块虚拟化；列表、表格暂时通过「编辑源码」修改
 
 > [!NOTE]
 > 工具栏命令来自 Lib-Markdown，编辑模式不是独立的一套解析器。
@@ -74,7 +74,7 @@ View App() {
   auto dark = UseState(false);
   auto draft = UseState(TextEditingValue::FromText(initial_source));
   auto document = UseState(initial_document);
-  auto status = UseState(std::string("实验阶段：源码/阅读模式，尚无段落原位编辑。"));
+  auto status = UseState(std::string("点击段落或标题开始编辑；Ctrl+Enter 完成。"));
   auto session = UseState(std::make_shared<WriterSession>());
   auto tasks = UseTaskScope();
   auto scroll = UseScrollController();
@@ -120,8 +120,20 @@ View App() {
       add_command("列表", "format-list", MarkdownEditCommand::BulletList);
       add_command("引用", "format-quote", MarkdownEditCommand::BlockQuote);
     }
-    View body = std::move(rendered);
+    View body = MarkdownEditor(draft, {.parse_options = WriterOptions(), .markdown_options = {.style = style},
+        .virtualization = {.scroll_controller = scroll}, .live_preview = preview.Get()})
+        .On<MarkdownEditorEvents::Changed>([=](const TextEditingValue& next) mutable {
+          const bool changed = next.text != draft.Get().text;
+          draft = next;
+          if (changed) {
+            ++session.Get()->edit_revision;
+            Schedule(session.Get(), tasks, next.text, document, status);
+          }
+        }).On<MarkdownEditorEvents::Error>([status](const std::string& error) mutable {
+          status = "无法编辑：" + error;
+        }).Key("writer-editor");
     if (editing.Get()) {
+      body = std::move(rendered);
       View source = TextField(draft).LineLimits(TextFieldLineLimits::MultiLine(1))
           .VerticalAlign(TextVerticalAlign::Top).OnChanged([=](const TextEditingValue& next) mutable {
             const bool changed = next.text != draft.Get().text;
@@ -139,17 +151,17 @@ View App() {
     return Column{
       Row{
         Text("Markdown Writer · 实验版").Style({Font::System(24).WithWeight(FontWeight::Bold), theme.colors.on_surface}).With(Grow{}),
-        Button(editing.Get() ? "阅读" : "编辑源码").OnClick([=]() mutable {
+        Button(editing.Get() ? "原位编辑" : "编辑源码").OnClick([=]() mutable {
           if (draft.Get().composition) { status = "请先完成输入法组合输入。"; return; }
           session.Get()->Cancel();
           if (Publish(session.Get(), draft.Get().text, document, status)) editing = !editing.Get();
         }).Key("mode-toggle"),
         Button(dark.Get() ? "浅色" : "深色").OnClick([dark]() mutable { dark = !dark.Get(); }).Key("writer-theme"),
       }.With(Spacing(12.0F)),
-      Text("类 Typora 开发 demo · 当前为源码/阅读双模式，尚无原位编辑")
+      Text("类 Typora 开发 demo · 段落/标题原位编辑 · 点击离开或 Ctrl+Enter 完成")
           .With(Foreground{theme.colors.on_surface_variant}),
       Flow(std::move(toolbar)).With(Spacing(8.0F)),
-      Checkbox("编辑时显示预览", preview.Get()).OnChanged([preview](bool enabled) mutable { preview = enabled; }).Key("writer-preview-toggle"),
+      Checkbox("显示实时预览", preview.Get()).OnChanged([preview](bool enabled) mutable { preview = enabled; }).Key("writer-preview-toggle"),
       std::move(body).With(Grow{}, Padding(16.0F), Background{theme.colors.surface}, Border{theme.colors.outline, 0.5F}),
       Text(status).With(Foreground{theme.colors.on_surface_variant}).Key("writer-status"),
     }.With(Padding(compact ? 12.0F : 24.0F), Spacing(12.0F), CrossAlign(CrossAxisAlignment::Stretch), Background{theme.colors.background});

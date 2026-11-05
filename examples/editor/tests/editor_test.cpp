@@ -25,8 +25,14 @@ int main(int argc, char** argv) { return Run([&] {
   const auto advance = [&](int ms) { ui.Pump(std::chrono::milliseconds(ms)); ui.Pump(); };
   CHECK(ui.Find(UiSelector::Text("开始写作")).Exists());
   CHECK(!ui.Find(UiSelector::Key("writer-source")).Exists());
+  ui.Find(UiSelector::Text("开始写作")).Tap();
+  auto block = ui.Find(UiSelector::AllOf(UiSelector::Key("markdown-block-input"), UiSelector::Focused(true)));
+  CHECK(block.One().value == "# 开始写作");
+  block.ReplaceText("# 原位输入😀");
+  CHECK(ui.Find(UiSelector::Key("markdown-block-preview")).Find(UiSelector::Text("原位输入😀")).Exists());
   ui.Find(UiSelector::Key("mode-toggle")).Tap();
   auto source = ui.Find(UiSelector::Key("writer-source"));
+  CHECK(source.One().value->starts_with("# 原位输入😀\n"));
   source.Tap();
   source.ReplaceText("中文😀");
   source.SetSelection({0, 4});
