@@ -11,7 +11,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     endif()
     set(HUXERUI_MARKDOWN_BUILD_EXAMPLES OFF)
 endif()
-huxerui_add_app(markdown_editor SOURCES src/app.cpp platform/desktop/main.cpp
+huxerui_add_app(markdown_editor SOURCES src/app.cpp src/main.cpp
     BUNDLE_NAME "Markdown Writer" BUNDLE_IDENTIFIER "org.huxerui.markdown.editor")
 if(TARGET HuxerUI::Markdown)
     huxerui_use_library(markdown_editor TARGET HuxerUI::Markdown)
@@ -43,6 +43,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR AND CMAKE_SYSTEM_NAME STRE
     install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/markdown_editor.resources/" DESTINATION bin/markdown_editor.resources)
     set(CPACK_PACKAGE_NAME "markdown-writer")
     set(CPACK_PACKAGE_VENDOR "HuxerUI")
+    set(CPACK_PACKAGE_CONTACT "FarnaHerry <108510510+FarnaHerry@users.noreply.github.com>")
     set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Markdown Writer editing demo")
     set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
     set(CPACK_GENERATOR "DEB;RPM")
