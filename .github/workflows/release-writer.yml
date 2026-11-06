@@ -85,7 +85,7 @@ jobs:
           java-version: '17'
       - name: Install Android toolchain
         run: |
-          sdk_manager=$(rg --files "$ANDROID_HOME/cmdline-tools" -g sdkmanager | head -n 1)
+          sdk_manager=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)
           test -n "$sdk_manager"
           printf 'y\n%.0s' {1..100} | "$sdk_manager" --licenses
           "$sdk_manager" --install 'platforms;android-36' 'ndk;29.0.14206865'
