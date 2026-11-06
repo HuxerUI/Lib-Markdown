@@ -30,6 +30,9 @@ int main(int argc, char** argv) { return Run([&] {
 #endif
   CHECK(!ui.Find(UiSelector::Key("writer-source")).Exists());
   CHECK(ui.Find(UiSelector::Key("writer-tabs")).Exists());
+  CHECK(ui.Find(UiSelector::Key("writer-logo")).Exists());
+  CHECK(!ui.Find(UiSelector::Text("Markdown Writer")).Exists());
+  CHECK(!ui.Find(UiSelector::Key("writer-close-tab-1")).Exists());
   CHECK(ui.Find(UiSelector::Key("writer-toolbar")).Exists());
   CHECK(ui.Find(UiSelector::Key("writer-open-file")).Exists());
   CHECK(ui.Find(UiSelector::Key("writer-save-file")).Exists());
@@ -55,6 +58,17 @@ int main(int argc, char** argv) { return Run([&] {
   CHECK(!initial_surface.Exists());
 #endif
   ui.Find(UiSelector::Key("writer-new-tab")).Tap();
+  CHECK(!ui.Find(UiSelector::Key("writer-close-tab-2")).Exists());
+  const auto second_tab_bounds = ui.Find(UiSelector::Key("writer-tab-2")).One().bounds;
+  ui.SendPointer({.type = PointerEventType::Move, .pointer_id = 40,
+      .position = {second_tab_bounds.x + 12.0F, second_tab_bounds.y + second_tab_bounds.height / 2.0F},
+      .device_kind = PointerDeviceKind::Mouse});
+  ui.Pump();
+  CHECK(ui.Find(UiSelector::Key("writer-close-tab-2")).Exists());
+  ui.SendPointer({.type = PointerEventType::Move, .pointer_id = 40, .position = {600.0F, 100.0F},
+      .device_kind = PointerDeviceKind::Mouse});
+  ui.Pump();
+  CHECK(!ui.Find(UiSelector::Key("writer-close-tab-2")).Exists());
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
   CHECK(ui.Find(UiSelector::Key("rich-text-editor")).Exists());
 #endif
@@ -69,10 +83,22 @@ int main(int argc, char** argv) { return Run([&] {
   CHECK(tab_source.One().value == "# 第二篇\n\n独立草稿");
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
   ui.Find(UiSelector::Key("mode-toggle")).Tap();
-  CHECK(ui.Find(UiSelector::Key("rich-text-editor")).Find(UiSelector::Text("独立草稿")).Exists());
+  const auto switched_surface = ui.Find(UiSelector::Key("rich-text-editor"));
+  CHECK(switched_surface.Find(UiSelector::Text("独立草稿")).Exists());
+  ui.Find(UiSelector::Key("writer-tabs")).Find(UiSelector::Text("开始写作")).Tap();
+  CHECK(switched_surface.Find(UiSelector::Text("开始写作")).Exists());
+  CHECK(!switched_surface.Find(UiSelector::Text("独立草稿")).Exists());
+  ui.Find(UiSelector::Key("writer-tabs")).Find(UiSelector::Text("文档 2")).Tap();
+  CHECK(switched_surface.Find(UiSelector::Text("独立草稿")).Exists());
+  CHECK(!switched_surface.Find(UiSelector::Text("开始写作")).Exists());
   ui.Find(UiSelector::Key("mode-toggle")).Tap();
 #endif
-  ui.Find(UiSelector::Key("writer-close-tab")).Tap();
+  const auto close_tab_bounds = ui.Find(UiSelector::Key("writer-tab-2")).One().bounds;
+  ui.SendPointer({.type = PointerEventType::Move, .pointer_id = 40,
+      .position = {close_tab_bounds.x + 12.0F, close_tab_bounds.y + close_tab_bounds.height / 2.0F},
+      .device_kind = PointerDeviceKind::Mouse});
+  ui.Pump();
+  ui.Find(UiSelector::Key("writer-close-tab-2")).Tap();
   CHECK(tab_source.One().value->starts_with("# 开始写作\n"));
   ui.Find(UiSelector::Key("mode-toggle")).Tap();
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE

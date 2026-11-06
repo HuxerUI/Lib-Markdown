@@ -1,9 +1,12 @@
 #include "app.h"
+#include "source_editor.h"
 #include <huxerui/markdown.h>
+#include <markdown_writer_resources.h>
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <utility>
 
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
@@ -65,6 +68,7 @@ struct WriterTab {
   std::shared_ptr<rich_text::detail::EditSession> editor;
 #endif
   std::shared_ptr<FileReference> file;
+  std::uint64_t id = 1;
   bool operator==(const WriterTab&) const = default;
 };
 
@@ -121,6 +125,7 @@ View App() {
   auto tabs = UseState(std::vector<WriterTab>{{"开始写作", TextEditingValue::FromText(initial_source)}});
   auto selected_tab = UseState(std::size_t{0});
   auto next_tab_number = UseState(std::size_t{2});
+  auto next_tab_id = UseState(std::uint64_t{2});
   auto opening_file = UseState(false);
   auto saving_file = UseState(false);
   auto document = UseState(initial_document);
@@ -133,6 +138,7 @@ View App() {
   auto tasks = UseTaskScope();
   auto picker = UseService<FilePicker>();
   auto scroll = UseScrollController();
+  const ImageAsset logo = UseImage(markdown_writer::images::hui);
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
   auto document_editor = UseState(std::make_shared<rich_text::detail::EditSession>(initial_edit_document));
   auto document_active = UseState(true);
@@ -150,7 +156,7 @@ View App() {
     auto style = MarkdownStyle::FromTheme(theme);
     style.body.font = style.body.font.WithSize(18);
     style.blank_line_height = 24;
-    const auto switch_tab = [=](std::size_t index) mutable {
+    const std::function<void(std::size_t)> switch_tab = [=](std::size_t index) mutable {
       if (index == selected_tab.Get() || index >= tabs.Get().size()) return;
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
       if (document_composing.Get()) { status = "请先完成输入法组合输入。"; return; }
@@ -270,12 +276,22 @@ View App() {
             status = "无法跨段编辑：" + std::string(error);
           },
           .format_actions = format_actions,
-      }).Key("writer-document");
+      }).Key("writer-document-" + std::to_string(tabs.Get().at(selected_tab.Get()).id));
     } else
 #endif
     if (editing.Get()) {
-      View source = TextField(draft).LineLimits(TextFieldLineLimits::MultiLine(1))
-          .VerticalAlign(TextVerticalAlign::Top).OnChanged(update_source).Key("writer-source");
+      View source;
+      // Keep the original single-field selection behavior for ordinary documents.
+      // The tab's opening size selects the layout path, avoiding a mid-edit mode switch.
+      if (tabs.Get().at(selected_tab.Get()).draft.text.size() >= 64 * 1024) {
+        source = LargeSourceEditor(draft.Get(), {
+            .style = style.body,
+            .changed = update_source,
+        }).Key("writer-source");
+      } else {
+        source = TextField(draft).LineLimits(TextFieldLineLimits::MultiLine(1))
+            .VerticalAlign(TextVerticalAlign::Top).OnChanged(update_source).Key("writer-source");
+      }
       if (preview.Get()) {
         View rendered = VirtualizedMarkdown(document.Get(), {.style = style}, {.scroll_controller = scroll})
             .On<MarkdownEvents::LinkActivated>([status](const MarkdownLinkActivation& event) mutable {
@@ -292,8 +308,68 @@ View App() {
             status = "无法编辑：" + error;
           }).Key("writer-editor");
     }
-    std::vector<StringVariant> tab_labels;
-    for (const auto& tab : tabs.Get()) tab_labels.emplace_back(tab.title);
+    const auto new_tab = [=]() mutable {
+      if (draft.Get().composition) { status = "请先完成输入法组合输入。"; return; }
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+      if (document_composing.Get()) { status = "请先完成输入法组合输入。"; return; }
+#endif
+      session.Get()->Cancel();
+      auto updated = tabs.Get();
+      updated[selected_tab.Get()].draft = draft.Get();
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+      updated[selected_tab.Get()].editor = document_editor.Get();
+#endif
+      const auto title = "文档 " + std::to_string(next_tab_number.Get());
+      next_tab_number = next_tab_number.Get() + 1;
+      WriterTab opened{title, TextEditingValue::FromText("# " + title + "\n\n")};
+      opened.id = next_tab_id.Get();
+      next_tab_id = opened.id + 1;
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+      opened.editor = std::make_shared<rich_text::detail::EditSession>(
+          EditableMarkdownDocument(opened.draft.text, WriterOptions()));
+      document_editor = opened.editor;
+      document_active = true;
+      preferred_document_mode = true;
+      editing = false;
+#endif
+      updated.push_back(std::move(opened));
+      selected_tab = updated.size() - 1;
+      draft = updated.back().draft;
+      tabs = std::move(updated);
+      (void)Publish(session.Get(), draft.Get().text, document, status);
+    };
+    const std::function<void(std::size_t)> close_tab = [=](std::size_t closing) mutable {
+      auto updated = tabs.Get();
+      if (updated.size() == 1 || closing >= updated.size()) return;
+      if (draft.Get().composition) { status = "请先完成输入法组合输入。"; return; }
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+      if (document_composing.Get()) { status = "请先完成输入法组合输入。"; return; }
+#endif
+      const auto current = selected_tab.Get();
+      if (closing == current) session.Get()->Cancel();
+      updated.erase(updated.begin() + closing);
+      const auto index = closing < current ? current - 1 :
+          closing == current ? std::min(closing, updated.size() - 1) : current;
+      if (closing != current) {
+        selected_tab = index;
+        tabs = std::move(updated);
+        return;
+      }
+      draft = updated[index].draft;
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+      const auto restore_error = PrepareDocumentEditor(updated[index]);
+      document_editor = updated[index].editor;
+      document_active = !editing.Get() && document_editor.Get() != nullptr;
+      preferred_document_mode = true;
+      if (restore_error) editing = true;
+#endif
+      selected_tab = index;
+      tabs = std::move(updated);
+      (void)Publish(session.Get(), draft.Get().text, document, status);
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+      if (restore_error) status = "当前文件需要源码模式：" + *restore_error;
+#endif
+    };
     toolbar.push_back(Button(editing.Get() ? "原位编辑" : "编辑源码").OnClick([=]() mutable {
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
           if (document_composing.Get()) { status = "请先完成输入法组合输入。"; return; }
@@ -388,6 +464,8 @@ View App() {
             const auto title = selected->Name().empty() ? "未命名文档" : selected->Name();
             WriterTab opened{title, TextEditingValue::FromText(std::move(result).Value())};
             opened.file = std::make_shared<FileReference>(std::move(*selected));
+            opened.id = next_tab_id.Get();
+            next_tab_id = opened.id + 1;
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
             try {
               opened.editor = std::make_shared<rich_text::detail::EditSession>(
@@ -434,64 +512,58 @@ View App() {
           });
         }).Key("writer-save-file"));
     toolbar.push_back(Button(dark.Get() ? "浅色" : "深色").OnClick([dark]() mutable { dark = !dark.Get(); }).Key("writer-theme"));
+    std::vector<View> tab_views;
+    const bool closeable = tabs.Get().size() > 1;
+    for (std::size_t index = 0; index < tabs.Get().size(); ++index) {
+      const auto& tab = tabs.Get()[index];
+      const auto title = tab.title;
+      const auto id = tab.id;
+      const bool selected = index == selected_tab.Get();
+      tab_views.push_back(Scope([=]() mutable -> View {
+        auto hovered = UseState(false);
+        std::vector<View> content;
+        content.push_back(Text(title).Style({Font::System(14),
+            selected ? theme.colors.primary : theme.colors.on_surface_variant}));
+        if (closeable) {
+          if (hovered.Get()) {
+            content.push_back(Text("×").Style({Font::System(18), theme.colors.on_surface_variant})
+                .Align(TextAlign::Center)
+                .With(Frame{.width = 24.0F, .height = 24.0F}, PointerCursor(PointerCursorKind::Hand),
+                      Semantics{.role = SemanticRole::Button, .label = "关闭 " + title})
+                .OnClick([close_tab, index]() mutable { close_tab(index); })
+                .Key("writer-close-tab-" + std::to_string(id)));
+          } else {
+            content.push_back(Spacer().With(Frame{.width = 24.0F, .height = 24.0F}));
+          }
+        }
+        Color selected_background = theme.colors.primary;
+        selected_background.alpha = 0.12F;
+        return Row(std::move(content))
+            .OnClick([switch_tab, index]() mutable { switch_tab(index); })
+            .On<ViewEvents::Hover>([hovered](const HoverEvent& event) mutable {
+              if (event.type != HoverEventType::Move) hovered = event.type == HoverEventType::Enter;
+            })
+            .With(Padding(EdgeInsets::Symmetric(12.0F, 4.0F)), Spacing(4.0F),
+                  Frame{.min_width = 48.0F, .min_height = 36.0F},
+                  CrossAlign(CrossAxisAlignment::Center),
+                  Background{selected ? selected_background : Color::Transparent()}, CornerRadius(6.0F),
+                  PointerCursor(PointerCursorKind::Hand),
+                  Semantics{.role = SemanticRole::Tab, .label = title, .selected = selected,
+                            .collection_item = SemanticCollectionItem{.index = index}})
+            .Key("writer-tab-" + std::to_string(id));
+      }).Key(id));
+    }
+    tab_views.push_back(Button("+").OnClick(new_tab).Key("writer-new-tab"));
     return Column{
       WindowTitleBar{
-        Text("Markdown Writer").Style({Font::System(16).WithWeight(FontWeight::Bold), theme.colors.on_surface}),
-        Tabs(std::move(tab_labels), selected_tab.Get()).OnChanged(switch_tab).With(Grow{}).Key("writer-tabs"),
-        Button("+").OnClick([=]() mutable {
-          if (draft.Get().composition) { status = "请先完成输入法组合输入。"; return; }
-#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-          if (document_composing.Get()) { status = "请先完成输入法组合输入。"; return; }
-#endif
-          session.Get()->Cancel();
-          auto updated = tabs.Get();
-          updated[selected_tab.Get()].draft = draft.Get();
-#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-          updated[selected_tab.Get()].editor = document_editor.Get();
-#endif
-          const auto title = "文档 " + std::to_string(next_tab_number.Get());
-          next_tab_number = next_tab_number.Get() + 1;
-          WriterTab opened{title, TextEditingValue::FromText("# " + title + "\n\n")};
-#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-          opened.editor = std::make_shared<rich_text::detail::EditSession>(
-              EditableMarkdownDocument(opened.draft.text, WriterOptions()));
-          document_editor = opened.editor;
-          document_active = true;
-          preferred_document_mode = true;
-          editing = false;
-#endif
-          updated.push_back(std::move(opened));
-          selected_tab = updated.size() - 1;
-          draft = updated.back().draft;
-          tabs = std::move(updated);
-          (void)Publish(session.Get(), draft.Get().text, document, status);
-        }).Key("writer-new-tab"),
-        Button("×").OnClick([=]() mutable {
-          if (tabs.Get().size() == 1) return;
-          if (draft.Get().composition) { status = "请先完成输入法组合输入。"; return; }
-#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-          if (document_composing.Get()) { status = "请先完成输入法组合输入。"; return; }
-          document_active = false;
-#endif
-          session.Get()->Cancel();
-          auto updated = tabs.Get();
-          updated.erase(updated.begin() + selected_tab.Get());
-          const auto index = std::min(selected_tab.Get(), updated.size() - 1);
-          selected_tab = index;
-          draft = updated[index].draft;
-#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-          const auto restore_error = PrepareDocumentEditor(updated[index]);
-          document_editor = updated[index].editor;
-          document_active = !editing.Get() && document_editor.Get() != nullptr;
-          preferred_document_mode = true;
-          if (restore_error) editing = true;
-#endif
-          tabs = std::move(updated);
-          (void)Publish(session.Get(), draft.Get().text, document, status);
-#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-          if (restore_error) status = "当前文件需要源码模式：" + *restore_error;
-#endif
-        }).Key("writer-close-tab"),
+        Image(logo).Fit(ImageFit::Contain)
+            .With(Frame{.width = 30.0F, .height = 30.0F},
+                  Semantics{.role = SemanticRole::Image, .label = "HuxerUI"})
+            .Key("writer-logo"),
+        ScrollView(Row(std::move(tab_views)).With(Spacing(4.0F), CrossAlign(CrossAxisAlignment::Center),
+            Semantics{.role = SemanticRole::TabList,
+                      .collection = SemanticCollection{.item_count = tabs.Get().size()}}))
+            .ScrollAxis(Axis::Horizontal).With(Grow{}).Key("writer-tabs"),
       }.With(Padding(EdgeInsets::Symmetric(compact ? 8.0F : 16.0F, 4.0F)), Spacing(8.0F), Background{theme.colors.surface}),
       Flow(std::move(toolbar)).With(Padding(EdgeInsets::Symmetric(compact ? 8.0F : 16.0F, 6.0F)), Spacing(8.0F)).Key("writer-toolbar"),
       std::move(body).With(Grow{}, Padding(compact ? 8.0F : 16.0F), Background{theme.colors.surface}, Border{theme.colors.outline, 0.5F}),

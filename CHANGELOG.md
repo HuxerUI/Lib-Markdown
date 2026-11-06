@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.2 (2026-11-06)
+
+- Replace Writer's fixed tab close button with an in-tab control shown on hover,
+  place New Tab after the final tab, and show the packaged HUI logo instead of
+  title text.
+- Remount the retained whole-document editor when the selected tab changes so an
+  opened file immediately renders its own contents.
+- Virtualize source editing for tabs opened at 64 KiB or more using newline-aligned
+  chunks of about 16 KiB. Relayout only the active chunk while preserving complete
+  source bytes, global UTF-16 selection/composition, saving and live preview.
+
 ## 0.2.1 (2026-11-06)
 
 Writer file workflow, whole-document editing by default, and split release packaging.
