@@ -37,7 +37,8 @@ struct EditorOptions {
   std::shared_ptr<InlineFormatActions> format_actions;
 };
 
-[[nodiscard]] View RichTextEditor(Document document, EditorOptions options);
+// The owner can retain the session between mounts and import while the view is inactive.
+[[nodiscard]] View RichTextEditor(std::shared_ptr<EditSession> edit, EditorOptions options);
 
 } // namespace detail
 

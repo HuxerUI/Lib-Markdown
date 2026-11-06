@@ -88,7 +88,7 @@ AttributedText EditableText(const AttributedText& text, Color link_color) {
 
 class Editor final : public TextInputClient, public TextSelectionClient {
 public:
-  Editor(EditSession edit, huxerui::State<std::uint64_t> revision, ScrollController scroll)
+  Editor(std::shared_ptr<EditSession> edit, huxerui::State<std::uint64_t> revision, ScrollController scroll)
       : edit_(std::move(edit)), view_revision_(std::move(revision)), scroll_(std::move(scroll)) {}
 
   void SetObservers(const detail::EditorOptions& options) {
@@ -98,12 +98,12 @@ public:
 
   void SetItemLookup(std::function<std::size_t(std::size_t)> lookup) { item_for_paragraph_ = std::move(lookup); }
 
-  const auto& Current() const { return edit_.Current(); }
-  auto Composition() const { return edit_.Composition(); }
+  const auto& Current() const { return edit_->Current(); }
+  auto Composition() const { return edit_->Composition(); }
   bool Focused() const noexcept { return session_ != 0; }
 
   void ToggleFormat(detail::InlineFormat format, TextSelection selection) {
-    Change([&] { edit_.ToggleFormat(format, selection); });
+    Change([&] { edit_->ToggleFormat(format, selection); });
   }
 
   void Register(RowGeometry& row) { rows_[row.id] = &row; }
@@ -143,17 +143,17 @@ public:
     if (session_ != id) return;
     session_ = 0;
     if (reason == TextInputEndReason::RuntimeDestroyed || reason == TextInputEndReason::ClientRemoved) {
-      edit_.FinishComposition();
+      edit_->FinishComposition();
       return;
     }
     const auto composing = Composition().has_value();
-    Change([&] { edit_.FinishComposition(); });
+    Change([&] { edit_->FinishComposition(); });
     if (!composing) Refresh();
   }
 
   TextInputApplyResult ApplyTextInput(const TextInputCommandBatch& batch) override {
     if (!Focused() || batch.session_id != session_) return {TextInputResultCode::SessionMismatch};
-    return {Change([&] { edit_.ApplyCommands(batch.commands); }, true)
+    return {Change([&] { edit_->ApplyCommands(batch.commands); }, true)
                 ? TextInputResultCode::Ok : TextInputResultCode::Rejected};
   }
 
@@ -229,8 +229,8 @@ public:
     const auto hit = Hit(point);
     if (!hit) return false;
     Change([&] {
-      edit_.FinishComposition();
-      edit_.SetSelection({extend ? Current().selection.anchor : hit->offset, hit->offset, hit->affinity});
+      edit_->FinishComposition();
+      edit_->SetSelection({extend ? Current().selection.anchor : hit->offset, hit->offset, hit->affinity});
     });
     return true;
   }
@@ -241,12 +241,12 @@ public:
     if (event.type != KeyEventType::Down) return unhandled;
     if (event.modifiers.control || event.modifiers.meta) {
       if (event.key == Key::Z || event.key == Key::Y) {
-        Change([&] { (event.modifiers.shift || event.key == Key::Y) ? edit_.Redo() : edit_.Undo(); }, true);
+        Change([&] { (event.modifiers.shift || event.key == Key::Y) ? edit_->Redo() : edit_->Undo(); }, true);
         return handled;
       }
       if (event.key == Key::B && !Composition()) {
         if (Current().document.Backing()) ToggleFormat(detail::InlineFormat::Bold, Current().selection);
-        else Change([&] { edit_.SetBold(!SelectionStartsBold()); });
+        else Change([&] { edit_->SetBold(!SelectionStartsBold()); });
         return handled;
       }
       if (event.key == Key::I && !Composition() && Current().document.Backing()) {
@@ -259,7 +259,7 @@ public:
     const auto selection = Current().selection;
     auto range = selection.Range();
     if (event.key == Key::Enter || event.key == Key::NumpadEnter) {
-      Change([&] { edit_.Replace(range, "\n"); }, true);
+      Change([&] { edit_->Replace(range, "\n"); }, true);
       return handled;
     }
     if (event.key == Key::Backspace || event.key == Key::Delete) {
@@ -267,7 +267,7 @@ public:
         const auto neighbor = Neighbor(selection.active, event.key == Key::Delete);
         range = {std::min(selection.active, neighbor), std::max(selection.active, neighbor)};
       }
-      Change([&] { edit_.Replace(range, {}); }, true);
+      Change([&] { edit_->Replace(range, {}); }, true);
       return handled;
     }
     if (event.key == Key::ArrowLeft || event.key == Key::ArrowRight) {
@@ -290,12 +290,12 @@ public:
   }
 
   bool CanPerformTextEditingAction(TextEditingAction action, PlatformClipboard* clipboard) const override {
-    return edit_.CanPerform(action, clipboard);
+    return edit_->CanPerform(action, clipboard);
   }
 
   bool PerformTextEditingAction(TextEditingAction action, PlatformClipboard* clipboard) override {
     bool performed = false;
-    Change([&] { performed = edit_.Perform(action, clipboard); },
+    Change([&] { performed = edit_->Perform(action, clipboard); },
            action == TextEditingAction::Paste || action == TextEditingAction::Cut);
     return performed;
   }
@@ -313,7 +313,7 @@ public:
     const auto end = Neighbor(hit->offset, true);
     const auto start = end == hit->offset ? Neighbor(end, false) : hit->offset;
     if (start == end) return false;
-    Change([&] { edit_.SetSelection({start, end}); });
+    Change([&] { edit_->SetSelection({start, end}); });
     return true;
   }
 
@@ -322,8 +322,8 @@ public:
     if (!hit) return false;
     const auto range = Current().selection.Range();
     Change([&] {
-      if (start_handle) edit_.SetSelection({range.end, std::min(hit->offset, range.end), hit->affinity});
-      else edit_.SetSelection({range.start, std::max(hit->offset, range.start), hit->affinity});
+      if (start_handle) edit_->SetSelection({range.end, std::min(hit->offset, range.end), hit->affinity});
+      else edit_->SetSelection({range.start, std::max(hit->offset, range.start), hit->affinity});
     });
     return true;
   }
@@ -371,7 +371,7 @@ private:
   void Refresh() { view_revision_ = view_revision_.Get() + 1; }
 
   void Move(TextOffset offset, TextAffinity affinity, bool extend) {
-    Change([&] { edit_.SetSelection({extend ? Current().selection.anchor : offset, offset, affinity}); }, true);
+    Change([&] { edit_->SetSelection({extend ? Current().selection.anchor : offset, offset, affinity}); }, true);
   }
 
   bool SelectionStartsBold() const {
@@ -452,7 +452,7 @@ private:
     return rects;
   }
 
-  EditSession edit_;
+  std::shared_ptr<EditSession> edit_;
   huxerui::State<std::uint64_t> view_revision_;
   ScrollController scroll_;
   std::function<void(const Document&, std::optional<TextRange>)> changed_;
@@ -464,7 +464,7 @@ private:
   TextInputSessionId session_ = 0;
   std::uint64_t revision_ = 0;
   std::uint64_t content_revision_ = 0;
-  bool reveal_ = false;
+  bool reveal_ = true;
 };
 
 struct DocumentSurface {
@@ -609,7 +609,7 @@ private:
   RowGeometry row_;
 };
 
-View MakeEditor(std::function<EditSession()> initialize, detail::EditorOptions options = {}) {
+View MakeEditor(std::function<std::shared_ptr<EditSession>()> initialize, detail::EditorOptions options = {}) {
   return Scope([initialize = std::move(initialize), options = std::move(options)]() -> View {
     auto revision = UseState(std::uint64_t{0});
     const auto owner = UseState(std::make_shared<std::shared_ptr<Editor>>()).Get();
@@ -665,11 +665,11 @@ View MakeEditor(std::function<EditSession()> initialize, detail::EditorOptions o
 } // namespace
 
 View RichTextEditor(std::vector<AttributedText> paragraphs) {
-  return MakeEditor([paragraphs = std::move(paragraphs)] { return EditSession(paragraphs); });
+  return MakeEditor([paragraphs = std::move(paragraphs)] { return std::make_shared<EditSession>(paragraphs); });
 }
 
-View detail::RichTextEditor(Document document, EditorOptions options) {
-  return MakeEditor([document = std::move(document)] { return EditSession(document); }, std::move(options));
+View detail::RichTextEditor(std::shared_ptr<EditSession> edit, EditorOptions options) {
+  return MakeEditor([edit = std::move(edit)] { return edit; }, std::move(options));
 }
 
 } // namespace huxerui::rich_text

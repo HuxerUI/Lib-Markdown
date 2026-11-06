@@ -230,6 +230,7 @@ int main() { return Run([] {
   const auto before_format_composition = formatted.Current().document;
   formatted.BeginComposition({0, 1});
   Throws<std::invalid_argument>([&] { formatted.ToggleFormat(InlineFormat::Italic, {0, 5}); });
+  Throws<std::logic_error>([&] { formatted.Import(EditableMarkdownDocument("other", blank_lines)); });
   CHECK(formatted.Current().document == before_format_composition);
   CHECK(formatted.CancelComposition());
 
@@ -272,4 +273,14 @@ int main() { return Run([] {
   rich_text::detail::EditSession admonition(EditableMarkdownDocument(admonition_source, {.admonitions = true}));
   admonition.Replace({0, 7}, "提示");
   CHECK(EditableMarkdownSource(admonition.Current().document) == "> [!NOTE]\r\n> **提示**\r\n");
+
+  const auto before_import = mixed_session.Current();
+  mixed_session.Import(EditableMarkdownDocument("# New\r\n", blank_lines));
+  CHECK(EditableMarkdownSource(mixed_session.Current().document) == "# New\r\n");
+  CHECK(mixed_session.Current().document.Paragraphs().front().id > before_import.document.Paragraphs().back().id);
+  CHECK(mixed_session.Undo());
+  CHECK(mixed_session.Current().document == before_import.document);
+  CHECK(mixed_session.Current().selection == before_import.selection);
+  CHECK(mixed_session.Redo());
+  CHECK(EditableMarkdownSource(mixed_session.Current().document) == "# New\r\n");
 }); }

@@ -69,6 +69,8 @@ public:
   [[nodiscard]] std::optional<TextRange> Composition() const noexcept { return composition_; }
 
   void SetSelection(TextSelection selection);
+  // Record an external draft as one edit with new paragraph identities.
+  void Import(Document document);
   void Replace(TextRange target, std::string_view text, std::optional<TextSelection> selection_after = {});
   void ApplyCommands(std::span<const TextInputCommand> commands);
   [[nodiscard]] bool CanPerform(TextEditingAction action, PlatformClipboard* clipboard) const;

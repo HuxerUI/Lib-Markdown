@@ -273,6 +273,23 @@ void EditSession::SetSelection(TextSelection selection) {
   current_.selection = selection;
 }
 
+void EditSession::Import(Document document) {
+  if (composition_) throw std::logic_error("Finish composition before importing a document");
+  if (document == current_.document) return;
+  const auto source = document.Paragraphs();
+  std::vector<Paragraph> paragraphs(source.begin(), source.end());
+  auto next_id = next_id_;
+  for (auto& paragraph : paragraphs) {
+    if (next_id == std::numeric_limits<TextBlockId>::max())
+      throw std::length_error("Rich text paragraph identifiers are exhausted");
+    paragraph.id = next_id++;
+  }
+  Document imported(std::move(paragraphs), document.Backing());
+  RecordUndo(current_);
+  current_ = {std::move(imported), {}};
+  next_id_ = next_id;
+}
+
 void EditSession::Replace(TextRange target, std::string_view text, std::optional<TextSelection> selection_after) {
   if (composition_) throw std::logic_error("Rich text replacement requires finishing composition");
   auto next_id = next_id_;

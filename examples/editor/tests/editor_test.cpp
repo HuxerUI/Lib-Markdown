@@ -159,5 +159,29 @@ int main(int argc, char** argv) { return Run([&] {
   ui.Find(UiSelector::Key("mode-toggle")).Tap();
   CHECK(source.One().value->find("  - [x] 中文\r\n") != std::string::npos);
   CHECK(source.One().value->find("| c | right末 |\r\n") != std::string::npos);
+  const auto mixed_draft = source.One().value.value();
+  experiment.Tap();
+  ui.Find(UiSelector::Text("right末")).Tap({.device_kind = PointerDeviceKind::Mouse});
+  ui.PressKey(Key::Z, {.control = true});
+  CHECK(ui.Find(UiSelector::Text("right")).Exists());
+  CHECK(ui.ActiveTextInput()->selection.active == 31);
+  ui.PressKey(Key::Y, {.control = true});
+  CHECK(ui.Find(UiSelector::Text("right末")).Exists());
+  ui.Find(UiSelector::Key("mode-toggle")).Tap();
+  CHECK(source.One().value == mixed_draft);
+
+  const auto imported_draft = mixed_draft + "\r\nImported paragraph\r\n";
+  source.Tap();
+  source.ReplaceText(imported_draft);
+  experiment.Tap();
+  CHECK(ui.Find(UiSelector::Text("Imported paragraph")).Exists());
+  ui.Find(UiSelector::Text("Mix")).Tap({.device_kind = PointerDeviceKind::Mouse});
+  ui.PressKey(Key::Z, {.control = true});
+  CHECK(!ui.Find(UiSelector::Text("Imported paragraph")).Exists());
+  CHECK(ui.Find(UiSelector::Text("right末")).Exists());
+  ui.PressKey(Key::Y, {.control = true});
+  CHECK(ui.Find(UiSelector::Text("Imported paragraph")).Exists());
+  ui.Find(UiSelector::Key("mode-toggle")).Tap();
+  CHECK(source.One().value == imported_draft);
 #endif
 }); }

@@ -93,7 +93,8 @@ View App() {
   auto tasks = UseTaskScope();
   auto scroll = UseScrollController();
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-  auto document_editor = UseState(std::optional<rich_text::detail::Document>{});
+  auto document_editor = UseState(std::shared_ptr<rich_text::detail::EditSession>{});
+  auto document_active = UseState(false);
   auto document_composing = UseState(false);
   const auto format_actions = UseState(std::make_shared<rich_text::detail::InlineFormatActions>()).Get();
 #endif
@@ -108,14 +109,14 @@ View App() {
     style.body.font = style.body.font.WithSize(18);
     style.blank_line_height = 24;
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-    const bool document_mode = document_editor.Get().has_value();
+    const bool document_mode = document_active.Get();
 #else
     constexpr bool document_mode = false;
 #endif
     std::vector<View> toolbar;
     const auto command_selection = [=]() -> std::optional<TextSelection> {
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-      if (document_editor.Get()) return format_actions->selection ? format_actions->selection() : std::nullopt;
+      if (document_active.Get()) return format_actions->selection ? format_actions->selection() : std::nullopt;
 #endif
       return draft.Get().selection;
     };
@@ -135,7 +136,7 @@ View App() {
               ? std::optional{saved->second} : command_selection();
           if (!selection) return;
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-          if (document_editor.Get()) {
+          if (document_active.Get()) {
             using rich_text::detail::InlineFormat;
             const auto format = command == MarkdownEditCommand::Bold ? InlineFormat::Bold :
                 command == MarkdownEditCommand::Italic ? InlineFormat::Italic : InlineFormat::Code;
@@ -176,8 +177,8 @@ View App() {
     using huxerui::markdown::detail::EditableMarkdownLayout;
     using huxerui::markdown::detail::EditableMarkdownSource;
     using huxerui::markdown::detail::EditableMarkdownSyntax;
-    if (const auto& editor = document_editor.Get()) {
-      body = rich_text::detail::RichTextEditor(*editor, {
+    if (document_mode) {
+      body = rich_text::detail::RichTextEditor(document_editor.Get(), {
           .base_style = style.body,
           .paragraph_spacing = style.block_spacing,
           .layout = [style](const rich_text::detail::Document& doc) {
@@ -229,24 +230,31 @@ View App() {
           session.Get()->Cancel();
           if (Publish(session.Get(), draft.Get().text, document, status)) {
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-            document_editor = std::optional<rich_text::detail::Document>{};
+            document_active = false;
 #endif
             editing = !editing.Get();
           }
         }).Key("mode-toggle"),
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-        Button(document_editor.Get() ? "返回块内编辑" : "跨段编辑").OnClick([=]() mutable {
+        Button(document_mode ? "返回块内编辑" : "跨段编辑").OnClick([=]() mutable {
           if (draft.Get().composition || document_composing.Get()) { status = "请先完成输入法组合输入。"; return; }
-          if (document_editor.Get()) {
-            document_editor = std::optional<rich_text::detail::Document>{};
+          if (document_active.Get()) {
+            document_active = false;
             status = "已返回块内编辑";
             return;
           }
           try {
-            auto next = EditableMarkdownDocument(draft.Get().text, WriterOptions());
+            auto editor = document_editor.Get();
+            const auto& source = draft.Get().text;
+            if (!editor) {
+              editor = std::make_shared<rich_text::detail::EditSession>(EditableMarkdownDocument(source, WriterOptions()));
+            } else if (EditableMarkdownSource(editor->Current().document) != source) {
+              editor->Import(EditableMarkdownDocument(source, WriterOptions()));
+            }
             session.Get()->Cancel();
-            document = EditableMarkdownSyntax(next);
-            document_editor = std::optional{std::move(next)};
+            document = EditableMarkdownSyntax(editor->Current().document);
+            document_editor = std::move(editor);
+            document_active = true;
             editing = false;
             status = "跨段编辑 · 选中标题和正文后输入，Ctrl+Z 撤销";
           } catch (const std::invalid_argument&) {
