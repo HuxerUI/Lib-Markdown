@@ -40,7 +40,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgtk-4-dev libepoxy-dev libsoup-3.0-dev pkg-config ninja-build
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev libepoxy-dev libsoup-3.0-dev pkg-config ninja-build rpm
       - name: Configure Writer
         shell: pwsh
         run: cmake -S examples/editor -B build-writer-release -DHUXERUI_HOME="${{ github.workspace }}/.cache/HuxerUI" -DHUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE=ON
@@ -52,7 +52,10 @@ jobs:
         run: Compress-Archive -Path build-writer-release/Release/markdown_editor.exe,build-writer-release/Release/markdown_editor.resources -DestinationPath markdown-writer-windows.zip
       - name: Package Linux
         if: runner.os == 'Linux'
-        run: tar -C build-writer-release -czf markdown-writer-linux.tar.gz markdown_editor markdown_editor.resources
+        run: |
+          tar -C build-writer-release -czf markdown-writer-linux.tar.gz markdown_editor markdown_editor.resources
+          cpack --config build-writer-release/CPackConfig.cmake -G DEB -B .
+          cpack --config build-writer-release/CPackConfig.cmake -G RPM -B .
       - name: Package macOS
         if: runner.os == 'macOS'
         run: ditto -c -k --sequesterRsrc --keepParent build-writer-release/markdown_editor.app markdown-writer-macos.zip
@@ -62,9 +65,44 @@ jobs:
           path: markdown-writer-*
           if-no-files-found: error
 
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out paragraph geometry SDK
+        uses: actions/checkout@v4
+        with:
+          repository: FarnaHerry/HuxerUI
+          ref: e119529d4fe118b0b4df4a0a306df6819814d7a0
+          path: .cache/HuxerUI
+      - name: Add attributed TextField support
+        run: |
+          git -C .cache/HuxerUI fetch --no-tags https://github.com/HuxerUI/HuxerUI.git e29c3c2573dcd7db201e7523ff59803529875d52
+          git -C .cache/HuxerUI cherry-pick --no-commit e29c3c2573dcd7db201e7523ff59803529875d52
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android toolchain
+        run: sdkmanager --install 'platforms;android-36' 'ndk;29.0.14206865'
+      - name: Build HuxerUI CLI
+        run: |
+          cmake -S .cache/HuxerUI/tools/huxerui_cli -B build-huxerui-cli -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-huxerui-cli --parallel 2
+      - name: Package installable Android demo
+        working-directory: examples/editor
+        run: ../../build-huxerui-cli/huxerui package android --profile debug --source ../../.cache/HuxerUI
+      - name: Stage APK
+        run: cp examples/editor/dist/android/*.apk markdown-writer-android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: markdown-writer-android
+          path: markdown-writer-android.apk
+          if-no-files-found: error
+
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: writer
+    needs: [writer, android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
