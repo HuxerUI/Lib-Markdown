@@ -23,13 +23,41 @@ int main(int argc, char** argv) { return Run([&] {
   CHECK(argc == 2);
   UiTest ui(application, {.viewport = {1180, 820}, .resource_provider = std::make_shared<WriterResources>(argv[1])});
   const auto advance = [&](int ms) { ui.Pump(std::chrono::milliseconds(ms)); ui.Pump(); };
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+  CHECK(ui.Find(UiSelector::Key("rich-text-editor")).Find(UiSelector::Text("开始写作")).Exists());
+#else
   CHECK(ui.Find(UiSelector::Value("开始写作")).Exists());
+#endif
   CHECK(!ui.Find(UiSelector::Key("writer-source")).Exists());
   CHECK(ui.Find(UiSelector::Key("writer-tabs")).Exists());
   CHECK(ui.Find(UiSelector::Key("writer-toolbar")).Exists());
   CHECK(ui.Find(UiSelector::Key("writer-open-file")).Exists());
   CHECK(ui.Find(UiSelector::Key("writer-save-file")).Exists());
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+  auto initial_surface = ui.Find(UiSelector::Key("rich-text-editor"));
+  initial_surface.Find(UiSelector::Text("开始写作")).Tap();
+  const auto enter_client = ui.ActiveTextInput()->session_id;
+  CHECK(ui.SendTextInput({enter_client, {{.kind = TextInputCommandKind::SetSelection,
+      .selection_after = TextSelection{4, 4}}}}).result_code == TextInputResultCode::Ok);
+  ui.PressKey(Key::Enter);
+  CHECK(ui.ActiveTextInput()->session_id == enter_client);
+  CHECK(ui.SendTextInput({enter_client, {{.kind = TextInputCommandKind::CommitText,
+      .text = "回车新段落"}}}).result_code == TextInputResultCode::Ok);
+  ui.Pump();
+  CHECK(initial_surface.Find(UiSelector::Text("回车新段落")).Exists());
+  ui.PressKey(Key::Z, {.control = true});
+  ui.PressKey(Key::Z, {.control = true});
+  ui.Find(UiSelector::Key("mode-toggle")).Tap();
+  CHECK(ui.Find(UiSelector::Key("writer-source")).Exists());
+  ui.Find(UiSelector::Key("mode-toggle")).Tap();
+  CHECK(initial_surface.Exists());
+  ui.Find(UiSelector::Key("document-mode-toggle")).Tap();
+  CHECK(!initial_surface.Exists());
+#endif
   ui.Find(UiSelector::Key("writer-new-tab")).Tap();
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+  CHECK(ui.Find(UiSelector::Key("rich-text-editor")).Exists());
+#endif
   ui.Find(UiSelector::Key("mode-toggle")).Tap();
   auto tab_source = ui.Find(UiSelector::Key("writer-source"));
   CHECK(tab_source.One().value == "# 文档 2\n\n");
@@ -42,6 +70,9 @@ int main(int argc, char** argv) { return Run([&] {
   ui.Find(UiSelector::Key("writer-close-tab")).Tap();
   CHECK(tab_source.One().value->starts_with("# 开始写作\n"));
   ui.Find(UiSelector::Key("mode-toggle")).Tap();
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+  ui.Find(UiSelector::Key("document-mode-toggle")).Tap();
+#endif
   auto block = ui.Find(UiSelector::AllOf(UiSelector::Key("markdown-block-input"), UiSelector::Focused(true)));
   ui.Find(UiSelector::Value("嵌套任务保留缩进和勾选状态")).Tap();
   CHECK(block.One().value == "嵌套任务保留缩进和勾选状态");
