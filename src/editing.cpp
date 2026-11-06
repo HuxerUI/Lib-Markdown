@@ -52,6 +52,45 @@ void ReplaceNestedContent(MarkdownNode& root, std::span<const std::size_t> path,
     throw std::invalid_argument("Markdown edit must stay inside the current text block");
   leaf = children.front();
 }
+
+void AppendMarkedText(MarkdownNode& block, std::string text, std::span<const MarkdownTextMark> marks) {
+  if (text.empty()) return;
+  MarkdownNode content;
+  content.text = std::move(text);
+  for (auto index = marks.size(); index > 0; --index) {
+    const auto& mark = marks[index - 1];
+    MarkdownNode wrapper;
+    wrapper.kind = mark.kind;
+    wrapper.destination = mark.destination;
+    wrapper.title = mark.title;
+    wrapper.children.push_back(std::move(content));
+    content = std::move(wrapper);
+  }
+  block.children.push_back(std::move(content));
+}
+
+void AppendRichSlice(MarkdownNode& block, const AttributedText& text,
+                     std::span<const MarkdownRichTextRun> runs, TextRange range) {
+  for (const auto& run : runs) {
+    const TextRange intersection{std::max(run.range.start, range.start), std::min(run.range.end, range.end)};
+    if (intersection.start < intersection.end)
+      AppendMarkedText(block, text.TextInRange(intersection), run.marks);
+  }
+}
+
+std::span<const MarkdownTextMark> MarksAt(std::span<const MarkdownRichTextRun> runs, TextOffset offset) {
+  for (const auto& run : runs) {
+    if (run.range.start <= offset && offset < run.range.end) return run.marks;
+  }
+  return {};
+}
+
+std::string_view LineEnding(std::string_view source, std::size_t start) {
+  auto at = source.find_first_of("\r\n", start);
+  if (at == std::string_view::npos) at = source.find_first_of("\r\n");
+  if (at == std::string_view::npos || source[at] == '\n') return "\n";
+  return source.substr(at).starts_with("\r\n") ? "\r\n" : "\r";
+}
 }
 
 std::optional<MarkdownNode> detail::ParseTableCell(std::string_view source, ParseOptions options) {
@@ -74,6 +113,167 @@ std::optional<MarkdownNode> detail::ParseTableCell(std::string_view source, Pars
       return std::nullopt;
   }
   return cells.front();
+}
+
+detail::MarkdownDocumentEditSession::MarkdownDocumentEditSession(std::string_view source, ParseOptions options)
+    : options_(options), parser_(EditingOptions(options)) {
+  options_.source_ranges = false;
+  (void)parser_.Update(source);
+  const auto& nodes = Document().Root().children;
+  for (std::size_t i = 0; i < nodes.size(); ++i) {
+    if (nodes[i].kind != NodeKind::BlankLines) blocks_.push_back({i, Document().TopLevelSourceRange(i)});
+  }
+  if (blocks_.empty() && source.find_first_not_of(" \t\r\n") == std::string_view::npos) {
+    const auto line_end = source.find_last_of("\r\n");
+    const auto line_start = line_end == std::string_view::npos ? 0 : line_end + 1;
+    blocks_.push_back({{}, MarkdownSourceRange{line_start, source.size()}});
+  }
+}
+
+detail::MarkdownDocumentEditSession::MarkdownDocumentEditSession(const MarkdownDocumentEditSession& other)
+    : options_(other.options_), parser_(other.parser_.Fork()), blocks_(other.blocks_) {}
+
+const MarkdownNode& detail::MarkdownDocumentEditSession::Block(std::size_t index) const {
+  const auto syntax_index = blocks_.at(index).syntax_index;
+  static const MarkdownNode empty{.kind = NodeKind::Paragraph};
+  return syntax_index ? Document().Root().children[*syntax_index] : empty;
+}
+
+std::optional<MarkdownSourceRange> detail::MarkdownDocumentEditSession::SourceRange(std::size_t index) const {
+  return blocks_.at(index).source;
+}
+
+detail::MarkdownBlockPosition detail::MarkdownDocumentEditSession::Replace(
+    MarkdownBlockPosition first, MarkdownBlockPosition last, std::string_view replacement) {
+  if (first.block > last.block || last.block >= blocks_.size() ||
+      (first.block == last.block && first.offset > last.offset)) {
+    throw std::invalid_argument("Markdown document edit range is invalid");
+  }
+  if (replacement.find('\r') != std::string_view::npos)
+    throw std::invalid_argument("Markdown paragraph separators use LF coordinates");
+  const auto start_range = SourceRange(first.block);
+  const auto end_range = SourceRange(last.block);
+  if (!start_range || !end_range) {
+    throw std::invalid_argument("Markdown document edit requires verified source ranges");
+  }
+  auto consumed = start_range->start_byte;
+  for (auto index = first.block; index <= last.block; ++index) {
+    const auto range = SourceRange(index);
+    if (!MarkdownRichText::Supports(Block(index)) || !range || range->start_byte < consumed ||
+        Source().substr(consumed, range->start_byte - consumed).find_first_not_of(" \t\r\n") !=
+            std::string_view::npos) {
+      throw std::invalid_argument("Markdown selection crosses content that requires source editing");
+    }
+    consumed = range->end_byte;
+  }
+
+  const auto& first_node = Block(first.block);
+  const MarkdownRichText head(first_node, options_);
+  const MarkdownRichText tail(Block(last.block), options_);
+  const AttributedText head_text(head.Value().text);
+  const AttributedText tail_text(tail.Value().text);
+  (void)head_text.TextInRange({first.offset, first.offset});
+  (void)tail_text.TextInRange({last.offset, last.offset});
+  if (first.block == last.block && head_text.TextInRange({first.offset, last.offset}) == replacement) return last;
+
+  const auto head_runs = head.Runs();
+  const auto tail_runs = tail.Runs();
+  const bool insertion = first == last;
+  const auto mark_offset = first.offset > 0 && (insertion || first.offset == head_text.Length())
+      ? first.offset - 1 : first.offset;
+  const auto marks = MarksAt(head_runs, mark_offset);
+  const auto eol = LineEnding(Source(), start_range->start_byte);
+  struct FormattedBlock {
+    MarkdownSourceRange range;
+    std::optional<MarkdownNode> node;
+  };
+  std::vector<FormattedBlock> formatted;
+  std::string source;
+  TextOffset caret_offset = first.offset;
+  while (true) {
+    const auto separator = replacement.find('\n');
+    const auto piece = replacement.substr(0, separator);
+    MarkdownNode block;
+    block.kind = NodeKind::Paragraph;
+    if (formatted.empty()) {
+      block.kind = first_node.kind;
+      block.heading_level = first_node.heading_level;
+      AppendRichSlice(block, head_text, head_runs, {0, first.offset});
+    } else {
+      source.append(eol);
+      source.append(eol);
+      caret_offset = 0;
+    }
+    AppendMarkedText(block, std::string(piece), marks);
+    if (separator == std::string_view::npos)
+      AppendRichSlice(block, tail_text, tail_runs, {last.offset, tail_text.Length()});
+    const auto serialized = MarkdownRichText(block, options_).SourceValue().text;
+    const auto start_byte = start_range->start_byte + source.size();
+    source += serialized;
+    const MarkdownSourceRange range{start_byte, start_byte + serialized.size()};
+    if (serialized.empty()) {
+      formatted.push_back({range, {}});
+    } else {
+      const auto fragment = ParseMarkdown(serialized, options_);
+      const auto& nodes = fragment.Root().children;
+      if (nodes.size() != 1 || nodes.front().kind != block.kind)
+        throw std::invalid_argument("Markdown edit could not preserve the text block kind");
+      formatted.push_back({range, nodes.front()});
+    }
+    if (separator == std::string_view::npos) {
+      caret_offset += AttributedText(std::string(piece)).Length();
+      break;
+    }
+    replacement.remove_prefix(separator + 1);
+  }
+
+  const MarkdownEdit edit{start_range->start_byte, end_range->end_byte - start_range->start_byte,
+                          std::move(source)};
+  // The splice must preserve all surrounding syntax. BlankLines can be
+  // coalesced by the parser, so empty editor rows keep their own byte anchors.
+  std::vector<BlockLocation> locations;
+  const auto original = Document();
+  const auto validate = [&](const MarkdownDocument& next) {
+    const std::span<const MarkdownNode> updated = next.Root().children;
+    std::size_t index = 0;
+    const auto skip_blank_lines = [&] {
+      while (index < updated.size() && updated[index].kind == NodeKind::BlankLines) ++index;
+    };
+    const auto add_node = [&](const MarkdownNode& expected) {
+      skip_blank_lines();
+      if (index == updated.size() || updated[index] != expected)
+        throw std::invalid_argument("Markdown document edit would change surrounding structure");
+      locations.push_back({index, next.TopLevelSourceRange(index)});
+      ++index;
+    };
+    const auto retain = [&](const BlockLocation& location, bool after) {
+      if (location.syntax_index) {
+        add_node(original.Root().children[*location.syntax_index]);
+      } else {
+        auto at = location.source->start_byte;
+        if (after) at = at - edit.removed_bytes + edit.inserted_text.size();
+        locations.push_back({{}, MarkdownSourceRange{at, at}});
+      }
+    };
+    for (std::size_t i = 0; i < first.block; ++i) retain(blocks_[i], false);
+    for (const auto& part : formatted) {
+      if (!part.node) {
+        locations.push_back({{}, part.range});
+        continue;
+      }
+      add_node(*part.node);
+      const auto verified = locations.back().source;
+      if (!verified || verified->start_byte < part.range.start_byte || verified->end_byte > part.range.end_byte)
+        throw std::invalid_argument("Markdown replacement has no verified source range");
+    }
+    for (std::size_t i = last.block + 1; i < blocks_.size(); ++i) retain(blocks_[i], true);
+    skip_blank_lines();
+    if (index != updated.size()) throw std::invalid_argument("Markdown document edit would introduce an extra block");
+  };
+  if (Source().substr(edit.start_byte, edit.removed_bytes) == edit.inserted_text) validate(original);
+  else (void)parser_.ApplyEdit(edit, validate);
+  blocks_ = std::move(locations);
+  return {first.block + formatted.size() - 1, caret_offset};
 }
 
 TextEditingValue ApplyMarkdownCommand(const TextEditingValue& value, MarkdownEditCommand command) {

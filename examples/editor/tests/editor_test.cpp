@@ -77,4 +77,54 @@ int main(int argc, char** argv) { return Run([&] {
   ui.SetWindowMetrics({.viewport = {480, 820}});
   ui.Pump();
   CHECK(ui.Find(UiSelector::Key("writer-preview")).One().bounds.y > source.One().bounds.y);
+
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+  ui.SetWindowMetrics({.viewport = {1180, 820}});
+  ui.Pump();
+  const auto experiment = ui.Find(UiSelector::Key("document-mode-toggle"));
+  const auto surface = ui.Find(UiSelector::Key("rich-text-editor"));
+  source.Tap();
+  source.ReplaceText("# Keep\r\n\r\n- item\r\n");
+  experiment.Tap();
+  CHECK(!surface.Exists() && source.Exists());
+
+  const std::string prose = "# Title\r\n\r\nBody\r\n\r\n*After*\r\n";
+  source.Tap();
+  source.ReplaceText(prose);
+  experiment.Tap();
+  CHECK(surface.Exists() && !source.Exists());
+  const auto first = ui.Find(UiSelector::Text("Title")).One().bounds;
+  const auto second = ui.Find(UiSelector::Text("Body")).One().bounds;
+  ui.Drag({first.x + 20, first.y + first.height / 2},
+          {second.x + 20, second.y + second.height / 2},
+          {.pointer = {.device_kind = PointerDeviceKind::Mouse}});
+  CHECK(ui.ActiveTextInput().has_value());
+  const auto client = ui.ActiveTextInput()->session_id;
+  CHECK(ui.ActiveTextInput()->selection.Range().start < 5);
+  CHECK(ui.ActiveTextInput()->selection.Range().end > 6);
+  const TextSelection across{2, 8};
+  CHECK(ui.SendTextInput({client, {{.kind = TextInputCommandKind::SetSelection, .selection_after = across}}})
+      .result_code == TextInputResultCode::Ok);
+  CHECK(ui.SendTextInput({client, {{.kind = TextInputCommandKind::UpdateComposition, .text = "拼"}}})
+      .result_code == TextInputResultCode::Ok);
+  CHECK(ui.ActiveTextInput()->composition == (TextRange{2, 3}));
+  CHECK(ui.SendTextInput({client, {{.kind = TextInputCommandKind::CommitText, .text = "中文"}}})
+      .result_code == TextInputResultCode::Ok);
+  ui.Pump();
+  CHECK(ui.Find(UiSelector::Text("Ti中文dy")).Exists());
+  ui.PressKey(Key::Z, {.control = true});
+  CHECK(ui.ActiveTextInput()->selection == across);
+  CHECK(ui.Find(UiSelector::Text("Title")).Exists() && ui.Find(UiSelector::Text("Body")).Exists());
+  ui.PressKey(Key::Y, {.control = true});
+  CHECK(ui.SendTextInput({client, {{.kind = TextInputCommandKind::SetSelection, .selection_after = TextSelection{6, 6}}}})
+      .result_code == TextInputResultCode::Ok);
+  ui.PressKey(Key::Enter);
+  CHECK(ui.ActiveTextInput()->selection == (TextSelection{7, 7}));
+  ui.PressKey(Key::Backspace);
+  CHECK(ui.ActiveTextInput()->selection == (TextSelection{6, 6}));
+  ui.Find(UiSelector::Key("writer-theme")).Tap();
+  CHECK(surface.Exists() && ui.Find(UiSelector::Text("Ti中文dy")).Exists());
+  ui.Find(UiSelector::Key("mode-toggle")).Tap();
+  CHECK(!surface.Exists() && source.One().value == "# Ti中文dy\r\n\r\n*After*\r\n");
+#endif
 }); }

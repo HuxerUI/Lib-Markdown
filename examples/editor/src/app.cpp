@@ -4,6 +4,11 @@
 #include <cstdint>
 #include <utility>
 
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+#include "document_editor_internal.h"
+#include "editor.h"
+#endif
+
 namespace markdown_writer {
 using namespace huxerui;
 using namespace huxerui::markdown;
@@ -87,6 +92,10 @@ View App() {
   auto session = UseState(std::make_shared<WriterSession>());
   auto tasks = UseTaskScope();
   auto scroll = UseScrollController();
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+  auto document_editor = UseState(std::optional<rich_text::detail::Document>{});
+  auto document_composing = UseState(false);
+#endif
   Lifecycle([=] {
     (void)Publish(session.Get(), initial_source, document, status);
     return [session] { session.Get()->Cancel(); };
@@ -97,10 +106,6 @@ View App() {
     auto style = MarkdownStyle::FromTheme(theme);
     style.body.font = style.body.font.WithSize(18);
     style.blank_line_height = 24;
-    View rendered = VirtualizedMarkdown(document.Get(), {.style = style}, {.scroll_controller = scroll})
-        .On<MarkdownEvents::LinkActivated>([status](const MarkdownLinkActivation& event) mutable {
-          status = "链接：" + event.destination;
-        }).Key("writer-preview");
     std::vector<View> toolbar;
     const auto add_command = [&](const char* title, const char* key, MarkdownEditCommand command) {
       toolbar.push_back(Button(title).On<ViewEvents::Pointer>([=](const PointerEvent& event) {
@@ -129,42 +134,99 @@ View App() {
       add_command("列表", "format-list", MarkdownEditCommand::BulletList);
       add_command("引用", "format-quote", MarkdownEditCommand::BlockQuote);
     }
-    View body = MarkdownEditor(draft, {.parse_options = WriterOptions(), .markdown_options = {.style = style},
-        .virtualization = {.scroll_controller = scroll}, .live_preview = preview.Get()})
-        .On<MarkdownEditorEvents::Changed>([=](const TextEditingValue& next) mutable {
-          const bool changed = next.text != draft.Get().text;
-          draft = next;
-          if (changed) {
+    const auto update_source = [=](const TextEditingValue& next) mutable {
+      const bool changed = next.text != draft.Get().text;
+      draft = next;
+      if (changed) {
+        ++session.Get()->edit_revision;
+        Schedule(session.Get(), tasks, next.text, document, status);
+      }
+    };
+    View body;
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+    using huxerui::markdown::detail::EditableMarkdownDocument;
+    using huxerui::markdown::detail::EditableMarkdownParagraph;
+    using huxerui::markdown::detail::EditableMarkdownSource;
+    using huxerui::markdown::detail::EditableMarkdownSyntax;
+    if (const auto& editor = document_editor.Get()) {
+      body = rich_text::detail::RichTextEditor(*editor, {
+          .base_style = style.body,
+          .paragraph_spacing = style.block_spacing,
+          .display = [style](const rich_text::detail::Document& doc, std::size_t index) {
+            return EditableMarkdownParagraph(doc, index, style);
+          },
+          .changed = [=](const rich_text::detail::Document& doc, std::optional<TextRange> composition) mutable {
+            document_composing = composition.has_value();
+            const auto source = EditableMarkdownSource(doc);
+            if (source == draft.Get().text) return;
+            draft = TextEditingValue::FromText(std::string(source));
+            document = EditableMarkdownSyntax(doc);
             ++session.Get()->edit_revision;
-            Schedule(session.Get(), tasks, next.text, document, status);
-          }
-        }).On<MarkdownEditorEvents::Error>([status](const std::string& error) mutable {
-          status = "无法编辑：" + error;
-        }).Key("writer-editor");
+            status = "跨段编辑 · 草稿已更新";
+          },
+          .rejected = [status](std::string_view error) mutable {
+            status = "无法跨段编辑：" + std::string(error);
+          },
+      }).Key("writer-document");
+    } else
+#endif
     if (editing.Get()) {
-      body = std::move(rendered);
       View source = TextField(draft).LineLimits(TextFieldLineLimits::MultiLine(1))
-          .VerticalAlign(TextVerticalAlign::Top).OnChanged([=](const TextEditingValue& next) mutable {
-            const bool changed = next.text != draft.Get().text;
-            draft = next;
-            if (changed) {
-              ++session.Get()->edit_revision;
-              Schedule(session.Get(), tasks, next.text, document, status);
-            }
-          }).Key("writer-source");
+          .VerticalAlign(TextVerticalAlign::Top).OnChanged(update_source).Key("writer-source");
       if (preview.Get()) {
-        body = compact ? View(Column{std::move(source).With(Grow{}), std::move(body).With(Grow{})}.With(Spacing(16.0F), CrossAlign(CrossAxisAlignment::Stretch)))
-                       : View(Row{std::move(source).With(Grow{}), std::move(body).With(Grow{})}.With(Spacing(24.0F), CrossAlign(CrossAxisAlignment::Stretch)));
+        View rendered = VirtualizedMarkdown(document.Get(), {.style = style}, {.scroll_controller = scroll})
+            .On<MarkdownEvents::LinkActivated>([status](const MarkdownLinkActivation& event) mutable {
+              status = "链接：" + event.destination;
+            }).Key("writer-preview");
+        body = compact ? View(Column{std::move(source).With(Grow{}), std::move(rendered).With(Grow{})}.With(Spacing(16.0F), CrossAlign(CrossAxisAlignment::Stretch)))
+                       : View(Row{std::move(source).With(Grow{}), std::move(rendered).With(Grow{})}.With(Spacing(24.0F), CrossAlign(CrossAxisAlignment::Stretch)));
       } else body = std::move(source);
+    } else {
+      body = MarkdownEditor(draft, {.parse_options = WriterOptions(), .markdown_options = {.style = style},
+          .virtualization = {.scroll_controller = scroll}, .live_preview = preview.Get()})
+          .On<MarkdownEditorEvents::Changed>(update_source)
+          .On<MarkdownEditorEvents::Error>([status](const std::string& error) mutable {
+            status = "无法编辑：" + error;
+          }).Key("writer-editor");
     }
     return Column{
       Row{
         Text("Markdown Writer · 实验版").Style({Font::System(24).WithWeight(FontWeight::Bold), theme.colors.on_surface}).With(Grow{}),
         Button(editing.Get() ? "原位编辑" : "编辑源码").OnClick([=]() mutable {
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+          if (document_composing.Get()) { status = "请先完成输入法组合输入。"; return; }
+#endif
           if (draft.Get().composition) { status = "请先完成输入法组合输入。"; return; }
           session.Get()->Cancel();
-          if (Publish(session.Get(), draft.Get().text, document, status)) editing = !editing.Get();
+          if (Publish(session.Get(), draft.Get().text, document, status)) {
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+            document_editor = std::optional<rich_text::detail::Document>{};
+#endif
+            editing = !editing.Get();
+          }
         }).Key("mode-toggle"),
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+        Button(document_editor.Get() ? "返回块内编辑" : "跨段编辑").OnClick([=]() mutable {
+          if (draft.Get().composition || document_composing.Get()) { status = "请先完成输入法组合输入。"; return; }
+          if (document_editor.Get()) {
+            document_editor = std::optional<rich_text::detail::Document>{};
+            status = "已返回块内编辑";
+            return;
+          }
+          try {
+            auto next = EditableMarkdownDocument(draft.Get().text, WriterOptions());
+            session.Get()->Cancel();
+            document = EditableMarkdownSyntax(next);
+            document_editor = std::optional{std::move(next)};
+            editing = false;
+            status = "跨段编辑 · 选中标题和正文后输入，Ctrl+Z 撤销";
+          } catch (const std::invalid_argument&) {
+            status = "跨段编辑目前支持标题和普通段落，请在源码模式试一篇纯正文草稿。";
+          } catch (const std::length_error& error) {
+            status = std::string("无法跨段编辑：") + error.what();
+          }
+        }).Key("document-mode-toggle"),
+#endif
         Button(dark.Get() ? "浅色" : "深色").OnClick([dark]() mutable { dark = !dark.Get(); }).Key("writer-theme"),
       }.With(Spacing(12.0F)),
       Text("类 Typora 开发 demo · 保持排版直接编辑 · 点击离开或 Ctrl+Enter 完成")

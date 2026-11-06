@@ -46,12 +46,30 @@ cmake --build build-editor --config Release --parallel
 Windows/Linux 分发时保留 exe 旁的 `markdown_editor.resources`。macOS 分发整个 app bundle。
 Linux 单配置输出通常是 `build-editor/markdown_editor`，macOS 是 `markdown_editor.app`。
 
+## 跨段编辑实验
+
+带段落几何接口的构建可打开「跨段编辑」。先在「编辑源码」里输入只有标题和普通段落的草稿，例如 `# 标题`、一个空行和 `含 **粗体** 的正文`。然后进入「跨段编辑」，可以从标题拖选到正文、输入中文、用 Enter 拆段及 Backspace 合段。`Ctrl+Z` 和 `Ctrl+Y` 同时还原或重做源码和选区。
+
+草稿在两种编辑方式和源码视图间共享。跨段选区与撤销历史的生命周期限于当前跨段会话。已有行内格式随输入保留，新增格式可使用源码工具栏。列表、引用、表格等使用常规块内编辑。源码中的空白行按正文段落间距显示，新建空段落在当前跨段会话中可输入。
+
+从库根目录构建此模式。以下命令将两项尚在 SDK 分支上的改动组合在独立的本地 SDK checkout 中。
+
+```powershell
+git clone https://github.com/FarnaHerry/HuxerUI.git .cache/writer-sdk
+git -C .cache/writer-sdk checkout --detach e119529d4fe118b0b4df4a0a306df6819814d7a0
+git -C .cache/writer-sdk fetch https://github.com/HuxerUI/HuxerUI.git e29c3c2573dcd7db201e7523ff59803529875d52
+git -C .cache/writer-sdk cherry-pick --no-commit e29c3c2573dcd7db201e7523ff59803529875d52
+cmake -S examples/editor -B build-writer-experiment -DHUXERUI_HOME="$PWD/.cache/writer-sdk" -DHUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE=ON
+cmake --build build-writer-experiment --config Release --parallel
+.\build-writer-experiment\Release\markdown_editor.exe
+```
+
 ## 测试和后续阶段
 
 独立配置增加 `-DHUXERUI_BUILD_TESTING_LIBRARY=ON -DHUXERUI_MARKDOWN_EDITOR_BUILD_TESTS=ON`，
 构建后运行 `ctest --test-dir build-editor -C Release --output-on-failure`。
 测试覆盖默认样例的嵌套任务编辑、Unicode 选区格式化、持续输入、模式切换、草稿保留、主题与窄窗口。
-CI 增加独立 editor 作业及 `markdown-editor-windows` 产物。
+CI 的独立 editor 作业还覆盖跨段编辑，产物为 `markdown-editor-windows`。
 
 后续按这些依赖顺序推进：
 

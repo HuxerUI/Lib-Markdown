@@ -1,5 +1,4 @@
 #include "editor.h"
-#include "model.h"
 
 #include <algorithm>
 #include <array>
@@ -89,9 +88,13 @@ AttributedText EditableText(const AttributedText& text, Color link_color) {
 
 class Editor final : public TextInputClient, public TextSelectionClient {
 public:
-  Editor(const std::vector<AttributedText>& paragraphs, huxerui::State<std::uint64_t> revision,
-         ScrollController scroll)
-      : edit_(paragraphs), view_revision_(std::move(revision)), scroll_(std::move(scroll)) {}
+  Editor(EditSession edit, huxerui::State<std::uint64_t> revision, ScrollController scroll)
+      : edit_(std::move(edit)), view_revision_(std::move(revision)), scroll_(std::move(scroll)) {}
+
+  void SetObservers(const detail::EditorOptions& options) {
+    changed_ = options.changed;
+    rejected_ = options.rejected;
+  }
 
   const auto& Current() const { return edit_.Current(); }
   auto Composition() const { return edit_.Composition(); }
@@ -130,21 +133,20 @@ public:
 
   void EndTextInput(TextInputSessionId id, TextInputEndReason reason) override {
     if (session_ != id) return;
-    edit_.FinishComposition();
     session_ = 0;
-    if (reason != TextInputEndReason::RuntimeDestroyed && reason != TextInputEndReason::ClientRemoved) Refresh();
+    if (reason == TextInputEndReason::RuntimeDestroyed || reason == TextInputEndReason::ClientRemoved) {
+      edit_.FinishComposition();
+      return;
+    }
+    const auto composing = Composition().has_value();
+    Change([&] { edit_.FinishComposition(); });
+    if (!composing) Refresh();
   }
 
   TextInputApplyResult ApplyTextInput(const TextInputCommandBatch& batch) override {
     if (!Focused() || batch.session_id != session_) return {TextInputResultCode::SessionMismatch};
-    try {
-      Change([&] { edit_.ApplyCommands(batch.commands); }, true);
-    } catch (const std::invalid_argument&) {
-      return {TextInputResultCode::Rejected};
-    } catch (const std::length_error&) {
-      return {TextInputResultCode::Rejected};
-    }
-    return {TextInputResultCode::Ok};
+    return {Change([&] { edit_.ApplyCommands(batch.commands); }, true)
+                ? TextInputResultCode::Ok : TextInputResultCode::Rejected};
   }
 
   TextInputContext QueryTextInputContext(TextInputSessionId id, TextOffset start, TextOffset length) const override {
@@ -278,14 +280,8 @@ public:
 
   bool PerformTextEditingAction(TextEditingAction action, PlatformClipboard* clipboard) override {
     bool performed = false;
-    try {
-      Change([&] { performed = edit_.Perform(action, clipboard); },
-             action == TextEditingAction::Paste || action == TextEditingAction::Cut);
-    } catch (const std::invalid_argument&) {
-      return false;
-    } catch (const std::length_error&) {
-      return false;
-    }
+    Change([&] { performed = edit_.Perform(action, clipboard); },
+           action == TextEditingAction::Paste || action == TextEditingAction::Cut);
     return performed;
   }
 
@@ -333,16 +329,28 @@ public:
   Color SelectionHandleColor() const noexcept override { return selection_color_; }
 
 private:
-  template<class Function> void Change(Function&& function, bool reveal = false) {
+  template<class Function> bool Change(Function&& function, bool reveal = false) {
     const auto before = Current();
     const auto composition = Composition();
-    function();
-    if (before.document != Current().document && !SameText(before.document, Current().document)) ++content_revision_;
-    if (before.document != Current().document || before.selection != Current().selection || composition != Composition()) {
+    try {
+      function();
+    } catch (const std::invalid_argument& error) {
+      if (rejected_) rejected_(error.what());
+      return false;
+    } catch (const std::length_error& error) {
+      if (rejected_) rejected_(error.what());
+      return false;
+    }
+    const bool document_changed = before.document != Current().document;
+    const bool composition_changed = composition != Composition();
+    if (document_changed && !SameText(before.document, Current().document)) ++content_revision_;
+    if (document_changed || before.selection != Current().selection || composition_changed) {
       ++revision_;
       reveal_ |= reveal;
       Refresh();
     }
+    if ((document_changed || composition_changed) && changed_) changed_(Current().document, Composition());
+    return true;
   }
 
   void Refresh() { view_revision_ = view_revision_.Get() + 1; }
@@ -432,6 +440,8 @@ private:
   EditSession edit_;
   huxerui::State<std::uint64_t> view_revision_;
   ScrollController scroll_;
+  std::function<void(const Document&, std::optional<TextRange>)> changed_;
+  std::function<void(std::string_view)> rejected_;
   std::map<TextBlockId, RowGeometry*> rows_;
   Transform2D transform_;
   Color selection_color_{};
@@ -582,38 +592,49 @@ private:
   RowGeometry row_;
 };
 
-} // namespace
-
-View RichTextEditor(std::vector<AttributedText> paragraphs) {
-  return Scope([paragraphs = std::move(paragraphs)]() -> View {
+View MakeEditor(std::function<EditSession()> initialize, detail::EditorOptions options = {}) {
+  return Scope([initialize = std::move(initialize), options = std::move(options)]() -> View {
     auto revision = UseState(std::uint64_t{0});
     const auto owner = UseState(std::make_shared<std::shared_ptr<Editor>>()).Get();
     const auto scroll = UseScrollController();
-    if (!*owner) *owner = std::make_shared<Editor>(paragraphs, revision, scroll);
+    if (!*owner) *owner = std::make_shared<Editor>(initialize(), revision, scroll);
     const auto editor = *owner;
+    editor->SetObservers(options);
     Lifecycle([editor] { editor->RevealIfNeeded(); }, revision.Get());
     const auto document = editor->Current().document;
     const auto& theme = UseTheme();
-    const TextStyle style{Font::FromFamily(theme.typography.family, theme.typography.body_large),
-                          theme.colors.on_surface};
+    const auto style = options.base_style.value_or(
+        TextStyle{Font::FromFamily(theme.typography.family, theme.typography.body_large), theme.colors.on_surface});
     const TextShapingOptions shaping{.locale = std::string(UseEnvironment<Locale>().LanguageTag())};
     auto selection = theme.colors.primary;
     selection.alpha *= 0.26F;
     const auto caret = theme.colors.primary;
     const auto line_height = UseTextMeasurer().Metrics(style.font).LineHeight();
+    const auto spacing = options.paragraph_spacing;
     return VirtualList(document.Paragraphs().size(), [=](std::size_t index) -> View {
       return Scope([=] {
         const auto& paragraph = document.Paragraphs()[index];
-        auto displayed = EditableText(paragraph.text, caret);
+        auto displayed = options.display ? options.display(document, index) : EditableText(paragraph.text, caret);
+        const float gap = index + 1 < document.Paragraphs().size() ? spacing : 0.0F;
         return Text(displayed).Style(style).Shaping(shaping)
-            .With(Frame{.min_height = line_height},
+            .With(Padding(EdgeInsets{0.0F, 0.0F, gap, 0.0F}), Frame{.min_height = line_height},
                   ParagraphSurface{editor, paragraph, displayed, index, document.Start(index), style, shaping,
                                    selection, caret});
       }).Key(document.Paragraphs()[index].id);
-    }).EstimatedItemExtent(line_height).Controller(scroll)
+    }).EstimatedItemExtent(line_height + spacing).Controller(scroll)
       .With(Focusable{true}, PointerCursor(PointerCursorKind::Text), DocumentSurface{editor, caret}, ScrollBar(),
             Grow{}).Key("rich-text-editor");
   });
+}
+
+} // namespace
+
+View RichTextEditor(std::vector<AttributedText> paragraphs) {
+  return MakeEditor([paragraphs = std::move(paragraphs)] { return EditSession(paragraphs); });
+}
+
+View detail::RichTextEditor(Document document, EditorOptions options) {
+  return MakeEditor([document = std::move(document)] { return EditSession(document); }, std::move(options));
 }
 
 } // namespace huxerui::rich_text

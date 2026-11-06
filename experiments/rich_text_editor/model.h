@@ -23,21 +23,33 @@ struct ParagraphPosition {
   TextOffset offset;
 };
 
+class DocumentBacking;
+
 // UTF-16 document offsets count a single LF between each pair of paragraphs.
 // Unaffected paragraphs share their attributed text with previous snapshots.
 class Document {
 public:
-  explicit Document(std::vector<Paragraph> paragraphs);
+  explicit Document(std::vector<Paragraph> paragraphs, std::shared_ptr<const DocumentBacking> backing = {});
   [[nodiscard]] std::span<const Paragraph> Paragraphs() const noexcept;
   [[nodiscard]] TextOffset Length() const noexcept;
   [[nodiscard]] TextOffset Start(std::size_t index) const;
   [[nodiscard]] ParagraphPosition Locate(TextOffset offset) const;
   [[nodiscard]] std::string TextInRange(TextRange range) const;
+  [[nodiscard]] const std::shared_ptr<const DocumentBacking>& Backing() const noexcept;
   bool operator==(const Document&) const noexcept = default;
 
 private:
   struct Storage;
   std::shared_ptr<const Storage> storage_;
+};
+
+// A source-backed editor publishes projections from accepted document edits.
+// The backing snapshot is kept alongside the displayed paragraphs in history.
+class DocumentBacking {
+public:
+  virtual ~DocumentBacking() = default;
+  [[nodiscard]] virtual Document Replace(const Document& document, TextRange target,
+                                         std::string_view replacement, TextBlockId& next_id) const = 0;
 };
 
 struct Snapshot {
@@ -50,6 +62,7 @@ struct Snapshot {
 class EditSession {
 public:
   explicit EditSession(std::vector<AttributedText> paragraphs = {});
+  explicit EditSession(Document document);
   [[nodiscard]] const Snapshot& Current() const noexcept { return current_; }
   [[nodiscard]] std::optional<TextRange> Composition() const noexcept { return composition_; }
 

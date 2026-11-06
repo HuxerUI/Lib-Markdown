@@ -28,6 +28,10 @@ if(HUXERUI_MARKDOWN_BUILD_VIEW)
     target_compile_options(markdown_rich_text_tests PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
     add_test(NAME markdown.rich_text COMMAND markdown_rich_text_tests)
     add_executable(markdown_editing_tests editing_test.cpp)
+    target_sources(markdown_editing_tests PRIVATE
+        ../src/document_editor_internal.cpp
+        ../experiments/rich_text_editor/model.cpp)
+    target_include_directories(markdown_editing_tests PRIVATE ../src ../experiments/rich_text_editor)
     target_link_libraries(markdown_editing_tests PRIVATE HuxerUI::Markdown)
     add_test(NAME markdown.editing COMMAND markdown_editing_tests)
     add_library(markdown_api_examples OBJECT api_examples.cpp)

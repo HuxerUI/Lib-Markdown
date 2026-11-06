@@ -82,6 +82,14 @@ Snapshot Replaced(const Snapshot& previous, TextRange target, const AttributedTe
     ValidateSelection(original, selection);
     return {original, selection};
   }
+  if (const auto& backing = original.Backing()) {
+    auto document = backing->Replace(original, target, inserted.PlainText(), next_id);
+    if (document.Length() != original.Length() - target.Length() + inserted.Length()) {
+      throw std::invalid_argument("Rich text backing changed the replacement coordinates");
+    }
+    ValidateSelection(document, selection);
+    return {std::move(document), selection};
+  }
 
   const auto old = original.Paragraphs();
   const auto prefix = old.first(first.index);
@@ -194,7 +202,8 @@ std::string ClipboardParagraphs(std::string_view text) {
 } // namespace
 
 struct Document::Storage {
-  explicit Storage(std::vector<Paragraph> value) : paragraphs(std::move(value)) {
+  Storage(std::vector<Paragraph> value, std::shared_ptr<const DocumentBacking> source)
+      : paragraphs(std::move(value)), backing(std::move(source)) {
     if (paragraphs.empty()) throw std::invalid_argument("Rich text document requires a paragraph");
     starts.reserve(paragraphs.size());
     for (const auto& paragraph : paragraphs) {
@@ -209,18 +218,21 @@ struct Document::Storage {
   }
 
   std::vector<Paragraph> paragraphs;
+  std::shared_ptr<const DocumentBacking> backing;
   std::vector<TextOffset> starts;
   TextOffset length = 0;
 };
 
-Document::Document(std::vector<Paragraph> paragraphs)
-    : storage_(std::make_shared<const Storage>(std::move(paragraphs))) {}
+Document::Document(std::vector<Paragraph> paragraphs, std::shared_ptr<const DocumentBacking> backing)
+    : storage_(std::make_shared<const Storage>(std::move(paragraphs), std::move(backing))) {}
 
 std::span<const Paragraph> Document::Paragraphs() const noexcept { return storage_->paragraphs; }
 
 TextOffset Document::Length() const noexcept { return storage_->length; }
 
 TextOffset Document::Start(std::size_t index) const { return storage_->starts.at(index); }
+
+const std::shared_ptr<const DocumentBacking>& Document::Backing() const noexcept { return storage_->backing; }
 
 ParagraphPosition Document::Locate(TextOffset offset) const {
   if (offset < 0 || offset > Length()) throw std::invalid_argument("Rich text offset is out of bounds");
@@ -246,7 +258,15 @@ std::string Document::TextInRange(TextRange range) const {
 }
 
 EditSession::EditSession(std::vector<AttributedText> paragraphs)
-    : current_{InitialDocument(std::move(paragraphs)), {}}, next_id_(current_.document.Paragraphs().back().id + 1) {}
+    : EditSession(InitialDocument(std::move(paragraphs))) {}
+
+EditSession::EditSession(Document document) : current_{std::move(document), {}},
+    next_id_(std::ranges::max(current_.document.Paragraphs(), {}, &Paragraph::id).id) {
+  if (next_id_ == std::numeric_limits<TextBlockId>::max()) {
+    throw std::length_error("Rich text paragraph identifiers are exhausted");
+  }
+  ++next_id_;
+}
 
 void EditSession::SetSelection(TextSelection selection) {
   ValidateSelection(current_.document, selection);
@@ -407,6 +427,9 @@ void EditSession::Delete(TextRange range) {
 
 void EditSession::SetBold(bool bold) {
   if (composition_) throw std::logic_error("Rich text formatting requires finishing composition");
+  if (current_.document.Backing()) {
+    throw std::invalid_argument("Use source editing to format this selection");
+  }
   const auto selection = current_.selection.Range();
   if (selection.IsCollapsed()) return;
   const auto first = current_.document.Locate(selection.start);

@@ -12,6 +12,10 @@
 
 namespace huxerui::markdown {
 
+namespace detail {
+class MarkdownDocumentEditSession;
+}
+
 /// CommonMark/GFM syntax kinds; Code is inline code, CodeBlock is block content.
 enum class NodeKind {
   Document, Paragraph, Heading, BlockQuote, UnorderedList, OrderedList, ListItem,
@@ -230,8 +234,11 @@ private:
   MarkdownDocument Update(std::string_view source, const ValidateDocument& validate);
   MarkdownDocument ApplyEdit(const MarkdownEdit& edit, const ValidateDocument& validate);
   struct Impl;
+  explicit MarkdownParseSession(const Impl& snapshot);
+  [[nodiscard]] MarkdownParseSession Fork() const;
   std::unique_ptr<Impl> impl_;
   friend class MarkdownBlockEditSession;
+  friend class detail::MarkdownDocumentEditSession;
 };
 
 /// Synchronous incremental Markdown input accepting arbitrary UTF-8 byte chunks.

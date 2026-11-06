@@ -570,6 +570,8 @@ MarkdownParseSession::MarkdownParseSession(ParseOptions options) : impl_(std::ma
   ValidateInput({}, options);
   impl_->options = options;
 }
+MarkdownParseSession::MarkdownParseSession(const Impl& snapshot) : impl_(std::make_unique<Impl>(snapshot)) {}
+MarkdownParseSession MarkdownParseSession::Fork() const { return MarkdownParseSession(*impl_); }
 MarkdownParseSession::~MarkdownParseSession() = default;
 std::string_view MarkdownParseSession::Source() const noexcept { return impl_->source; }
 const MarkdownDocument& MarkdownParseSession::Document() const noexcept { return impl_->document; }
