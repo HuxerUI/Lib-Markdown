@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Markdown Writer
+Comment=Edit Markdown documents
+Exec=markdown_editor
+Icon=markdown-writer
+Terminal=false
+Categories=Office;TextEditor;

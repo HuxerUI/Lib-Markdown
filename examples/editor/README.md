@@ -47,8 +47,8 @@ cmake --build build-editor --config Release --parallel
 
 Windows/Linux 分发时保留 exe 旁的 `markdown_editor.resources`。macOS 分发整个 app bundle。
 Linux 单配置输出通常是 `build-editor/markdown_editor`，macOS 是 `markdown_editor.app`。
-推送 `v*` 标签时，`Release Markdown Writer` 工作流构建 Windows ZIP、macOS app ZIP、Linux 绿色 tar.gz、DEB、RPM 和 Android APK，并附加到同名 GitHub Release；手动运行工作流只生成 Actions 构建产物。
-Linux 包依赖系统提供 GTK4、libepoxy 和 libsoup 3。Windows、macOS 包保留各自的资源目录或 app bundle。Android APK 使用调试签名，适合安装验证 demo；正式分发需要稳定的发布签名。
+推送 `v*` 标签时，`Release Markdown Writer` 工作流构建 Windows ZIP、macOS app ZIP、Linux 绿色 tar.gz、DEB、RPM，以及分别适用于 ARM64 设备和 x86_64（AMD64）设备的 Android APK，并附加到同名 GitHub Release；手动运行工作流只生成 Actions 构建产物。
+Linux 包依赖系统提供 GTK4、libepoxy 和 libsoup 3；DEB/RPM 安装后可在应用菜单中找到 Markdown Writer。Windows、macOS 包保留各自的资源目录或 app bundle。Android APK 使用调试签名，适合安装验证 demo；正式分发需要稳定的发布签名。
 
 ## 跨段编辑实验
 

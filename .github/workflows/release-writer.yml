@@ -40,7 +40,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgtk-4-dev libepoxy-dev libsoup-3.0-dev pkg-config ninja-build rpm
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev libepoxy-dev libsoup-3.0-dev pkg-config ninja-build rpm desktop-file-utils
       - name: Configure Writer
         shell: pwsh
         run: cmake -S examples/editor -B build-writer-release -DHUXERUI_HOME="${{ github.workspace }}/.cache/HuxerUI" -DHUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE=ON
@@ -53,9 +53,14 @@ jobs:
       - name: Package Linux
         if: runner.os == 'Linux'
         run: |
+          desktop-file-validate examples/editor/platform/linux/markdown-writer.desktop
           tar -C build-writer-release -czf markdown-writer-linux.tar.gz markdown_editor markdown_editor.resources
           cpack --config build-writer-release/CPackConfig.cmake -G DEB -B .
           cpack --config build-writer-release/CPackConfig.cmake -G RPM -B .
+          dpkg-deb -c markdown-writer-*.deb | grep -q '/share/applications/markdown-writer.desktop$'
+          dpkg-deb -c markdown-writer-*.deb | grep -q '/share/icons/hicolor/192x192/apps/markdown-writer.png$'
+          rpm -qlp markdown-writer-*.rpm | grep -q '/share/applications/markdown-writer.desktop$'
+          rpm -qlp markdown-writer-*.rpm | grep -q '/share/icons/hicolor/192x192/apps/markdown-writer.png$'
       - name: Package macOS
         if: runner.os == 'macOS'
         run: ditto -c -k --sequesterRsrc --keepParent build-writer-release/markdown_editor.app markdown-writer-macos.zip
@@ -66,6 +71,10 @@ jobs:
           if-no-files-found: error
 
   android:
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, x86_64]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -93,15 +102,22 @@ jobs:
         run: |
           cmake -S .cache/HuxerUI/tools/huxerui_cli -B build-huxerui-cli -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build-huxerui-cli --parallel 2
+      - name: Select Android ABI
+        run: sed -i 's/^huxeruiAbis=.*/huxeruiAbis=${{ matrix.abi }}/' examples/editor/platform/android/gradle.properties
       - name: Package installable Android demo
         working-directory: examples/editor
         run: ../../build-huxerui-cli/huxerui package android --profile debug --source ../../.cache/HuxerUI
       - name: Stage APK
-        run: cp examples/editor/dist/android/*.apk markdown-writer-android.apk
+        run: |
+          apk=$(find examples/editor/dist/android -maxdepth 1 -name '*.apk' -print -quit)
+          test -n "$apk"
+          actual_abis=$(unzip -Z1 "$apk" | sed -n 's|^lib/\([^/]*\)/.*\.so$|\1|p' | sort -u)
+          test "$actual_abis" = '${{ matrix.abi }}'
+          cp "$apk" 'markdown-writer-android-${{ matrix.abi }}.apk'
       - uses: actions/upload-artifact@v4
         with:
-          name: markdown-writer-android
-          path: markdown-writer-android.apk
+          name: markdown-writer-android-${{ matrix.abi }}
+          path: markdown-writer-android-${{ matrix.abi }}.apk
           if-no-files-found: error
 
   publish:
