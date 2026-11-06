@@ -1,6 +1,24 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.1 (2026-11-06)
+
+Writer file workflow, whole-document editing by default, and split release packaging.
+
+- Add Open File and Save to the Writer toolbar: read Markdown or plain-text files
+  through the system picker into a new tab, write back when the file is writable,
+  and refuse to switch documents while IME composition is active.
+- Refresh the source-mode preview immediately when an edit adds or removes a line
+  instead of waiting for the coalesced live-preview deadline.
+- Use whole-document layout editing by default in document-mode Writer: Enter
+  creates and renders a new paragraph at once, while single-block editing remains
+  an explicit mode.
+- Rebuild each tab's document edit session when switching or restoring tabs, so
+  reopened drafts match their source text and fall back to source mode when the
+  document cannot be laid out.
+- Publish separate ARM64 and x86_64 Android APKs, assert the packaged ABI, and add
+  a validated Linux desktop entry and icon to the DEB/RPM packages.
+
+## 0.2.0 (2026-11-06)
 
 Public API normalization; rebuild the library and applications together. See
 [migration-0.2.md](docs/migration-0.2.md) for the source migration.
@@ -68,5 +86,5 @@ Public API normalization; rebuild the library and applications together. See
   unchanged and handle its tab-collapse defect in the adapter.
 - Document rich editing boundaries and nonblocking follow-up decisions.
 
-No release tag has been created. Default syntax remains unchanged; new extensions
-are explicitly enabled. Demo parsing enables the optional extensions.
+Default syntax remains unchanged; new extensions are explicitly enabled. Demo
+parsing enables the optional extensions.
