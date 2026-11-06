@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <utility>
 
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
@@ -63,6 +64,7 @@ struct WriterTab {
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
   std::shared_ptr<rich_text::detail::EditSession> editor;
 #endif
+  std::shared_ptr<FileReference> file;
   bool operator==(const WriterTab&) const = default;
 };
 
@@ -100,10 +102,13 @@ View App() {
   auto tabs = UseState(std::vector<WriterTab>{{"开始写作", TextEditingValue::FromText(initial_source)}});
   auto selected_tab = UseState(std::size_t{0});
   auto next_tab_number = UseState(std::size_t{2});
+  auto opening_file = UseState(false);
+  auto saving_file = UseState(false);
   auto document = UseState(initial_document);
   auto status = UseState(std::string("点击正文、列表项或单元格开始编辑，Ctrl+Enter 完成。"));
   auto session = UseState(std::make_shared<WriterSession>());
   auto tasks = UseTaskScope();
+  auto picker = UseService<FilePicker>();
   auto scroll = UseScrollController();
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
   auto document_editor = UseState(std::shared_ptr<rich_text::detail::EditSession>{});
@@ -197,10 +202,16 @@ View App() {
     }
     const auto update_source = [=](const TextEditingValue& next) mutable {
       const bool changed = next.text != draft.Get().text;
+      const bool line_count_changed = changed &&
+          std::count(next.text.begin(), next.text.end(), '\n') !=
+          std::count(draft.Get().text.begin(), draft.Get().text.end(), '\n');
       draft = next;
       if (changed) {
         ++session.Get()->edit_revision;
-        Schedule(session.Get(), tasks, next.text, document, status);
+        if (line_count_changed) {
+          session.Get()->Cancel();
+          (void)Publish(session.Get(), next.text, document, status);
+        } else Schedule(session.Get(), tasks, next.text, document, status);
       }
     };
     View body;
@@ -296,6 +307,78 @@ View App() {
         }).Key("document-mode-toggle"));
 #endif
     toolbar.push_back(Checkbox("实时预览", preview.Get()).OnChanged([preview](bool enabled) mutable { preview = enabled; }).Key("writer-preview-toggle"));
+    toolbar.push_back(Button("打开文件").With(Enabled(!opening_file.Get() && picker->CanOpenFiles()))
+        .OnClick([=]() mutable {
+          opening_file = true;
+          tasks.Launch([=]() mutable -> Task<void> {
+            const FilePickerFilter filter{.name = "Markdown files", .extensions = {"md", "markdown", "mdown", "txt"},
+                .content_types = {"text/markdown", "text/plain"}};
+            auto selected = co_await picker->OpenFileAsync(filter);
+            if (!selected) { opening_file = false; co_return; }
+            auto result = co_await selected->ReadStringAsync();
+            if (!result.Succeeded()) {
+              status = "无法打开文件：" + result.Error().message;
+              opening_file = false;
+              co_return;
+            }
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+            if (document_composing.Get()) {
+              status = "请先完成输入法组合输入。";
+              opening_file = false;
+              co_return;
+            }
+#endif
+            if (draft.Get().composition) {
+              status = "请先完成输入法组合输入。";
+              opening_file = false;
+              co_return;
+            }
+            session.Get()->Cancel();
+            auto updated = tabs.Get();
+            updated[selected_tab.Get()].draft = draft.Get();
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+            updated[selected_tab.Get()].editor = document_editor.Get();
+            document_editor = {};
+            document_active = false;
+#endif
+            const auto title = selected->Name().empty() ? "未命名文档" : selected->Name();
+            WriterTab opened{title, TextEditingValue::FromText(std::move(result).Value())};
+            opened.file = std::make_shared<FileReference>(std::move(*selected));
+            updated.push_back(std::move(opened));
+            selected_tab = updated.size() - 1;
+            draft = updated.back().draft;
+            tabs = std::move(updated);
+            (void)Publish(session.Get(), draft.Get().text, document, status);
+            opening_file = false;
+          });
+        }).Key("writer-open-file"));
+    const auto current_file = tabs.Get().at(selected_tab.Get()).file;
+    toolbar.push_back(Button("保存").With(Enabled(current_file && current_file->CanWrite() && !saving_file.Get()))
+        .OnClick([=]() mutable {
+          saving_file = true;
+          const auto contents = draft.Get().text;
+          tasks.Launch([=]() mutable -> Task<void> {
+            auto opened = co_await current_file->OpenWriteAsync();
+            if (!opened.Succeeded()) {
+              status = "无法保存文件：" + opened.Error().message;
+              saving_file = false;
+              co_return;
+            }
+            auto writer = std::move(opened).Value();
+            Bytes data(contents.size());
+            if (!contents.empty()) std::memcpy(data.data(), contents.data(), contents.size());
+            auto written = co_await writer.WriteAsync(std::move(data));
+            if (!written.Succeeded()) {
+              status = "无法保存文件：" + written.Error().message;
+              saving_file = false;
+              co_return;
+            }
+            auto closed = co_await writer.CloseAsync();
+            status = closed.Succeeded() ? "已保存 " + current_file->Name() :
+                "无法保存文件：" + closed.Error().message;
+            saving_file = false;
+          });
+        }).Key("writer-save-file"));
     toolbar.push_back(Button(dark.Get() ? "浅色" : "深色").OnClick([dark]() mutable { dark = !dark.Get(); }).Key("writer-theme"));
     return Column{
       WindowTitleBar{

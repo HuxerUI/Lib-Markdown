@@ -27,6 +27,8 @@ int main(int argc, char** argv) { return Run([&] {
   CHECK(!ui.Find(UiSelector::Key("writer-source")).Exists());
   CHECK(ui.Find(UiSelector::Key("writer-tabs")).Exists());
   CHECK(ui.Find(UiSelector::Key("writer-toolbar")).Exists());
+  CHECK(ui.Find(UiSelector::Key("writer-open-file")).Exists());
+  CHECK(ui.Find(UiSelector::Key("writer-save-file")).Exists());
   ui.Find(UiSelector::Key("writer-new-tab")).Tap();
   ui.Find(UiSelector::Key("mode-toggle")).Tap();
   auto tab_source = ui.Find(UiSelector::Key("writer-source"));
@@ -79,6 +81,12 @@ int main(int argc, char** argv) { return Run([&] {
     advance(30);
     if (i % 4 == 3) CHECK(ui.Find(UiSelector::Key("writer-preview")).Find(UiSelector::Text(repeated)).Exists());
   }
+  source.ReplaceText("# 回车立即更新");
+  advance(121);
+  source.SetSelection({AttributedText(*source.One().value).Length(), AttributedText(*source.One().value).Length()});
+  ui.PressKey(Key::Enter);
+  CHECK(source.One().value == "# 回车立即更新\n");
+  CHECK(ui.Find(UiSelector::Key("writer-status")).One().text->starts_with("已更新"));
   source.ReplaceText("# 切换时立即更新\n");
   ui.Find(UiSelector::Key("mode-toggle")).Tap(); // Flush queued input immediately.
   CHECK(ui.Find(UiSelector::Value("切换时立即更新")).Exists());
