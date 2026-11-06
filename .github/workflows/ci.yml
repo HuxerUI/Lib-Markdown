@@ -63,3 +63,29 @@ jobs:
           path: |
             build/Release/markdown_${{ matrix.name }}.exe
             build/Release/markdown_${{ matrix.name }}.resources/
+
+  rich-text-editor:
+    name: native (rich text editor prototype)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out paragraph geometry SDK
+        uses: actions/checkout@v4
+        with:
+          repository: FarnaHerry/HuxerUI
+          ref: e119529d4fe118b0b4df4a0a306df6819814d7a0
+          path: .cache/paragraph-layout-sdk
+      - name: Configure
+        run: cmake -S experiments/rich_text_editor -B build -DHUXERUI_HOME="${{ github.workspace }}/.cache/paragraph-layout-sdk" -DHUXERUI_BUILD_TESTING_LIBRARY=ON
+      - name: Build
+        run: cmake --build build --config Release --parallel 2
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Upload Windows demo
+        uses: actions/upload-artifact@v4
+        with:
+          name: rich-text-editor-windows
+          if-no-files-found: error
+          path: |
+            build/Release/rich_text_editor_demo.exe
+            build/Release/rich_text_editor_demo.resources/

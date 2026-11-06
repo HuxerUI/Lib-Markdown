@@ -33,6 +33,8 @@ Markdown 编辑 API 可以随模型迁移调整，届时同时迁移 Writer、�
 
 ## 阶段 2　验证 HuxerUI 段落几何接口
 
+已推送 `codex/paragraph-layout`。Windows 公共头文件、通用与原生测试通过。Fedora 通用测试和 16 项原生文字布局用例通过，文件选择器及 EGL 相关的 9 项失败与官方基线一致。[SDK 提交](https://github.com/FarnaHerry/HuxerUI/commit/e119529d4fe118b0b4df4a0a306df6819814d7a0)
+
 - 从官方 `main` 验证一个最小的公开布局查询接口。输入是 `AttributedText`、基准样式、可用宽度与布局选项。
   对外提供点击命中、光标矩形和范围矩形，统一使用段落局部逻辑坐标、UTF-16 偏移与 affinity。
 - 用实际原生段落布局对照绘制、换行和选区，覆盖混合字重、窄列、组合字符及双向文本。
@@ -41,6 +43,10 @@ Markdown 编辑 API 可以随模型迁移调整，届时同时迁移 Writer、�
   段落局部坐标映射到文档、视口和平台输入位置。
 
 ## 阶段 3　实现独立 RichTextEditor 的首条编辑路径
+
+独立原型位于 [experiments/rich_text_editor](../../experiments/rich_text_editor/README.md)。每段使用 `Text(AttributedText)` 显示，编辑面持有单个原生输入客户端。文档模型处理原子输入批次、跨段替换和统一撤销。链接外观在编辑态投影为样式，正文鼠标操作交给编辑面。
+
+Windows 已通过模型和交互套件，并验证打包示例可启动。组合输入回归使用平台归一化指令，真实输入法候选窗与辅助功能留在设备验收。
 
 - 用带稳定标识的段落快照、文档选区和一个输入会话表达整篇编辑状态。输入、跨段替换、格式操作和
   撤销使用同一套事务。输入法预编辑按一次提交分组，取消时恢复先前的内容和选区。
