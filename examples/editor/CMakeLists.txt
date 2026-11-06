@@ -11,8 +11,14 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     endif()
     set(HUXERUI_MARKDOWN_BUILD_EXAMPLES OFF)
 endif()
+set(_writer_resource_output)
+if(ANDROID AND HUXERUI_ANDROID_RESOURCE_OUTPUT_ROOT)
+    list(APPEND _writer_resource_output RESOURCE_OUTPUT_DIRECTORY
+        "${HUXERUI_ANDROID_RESOURCE_OUTPUT_ROOT}/${ANDROID_ABI}")
+endif()
 huxerui_add_app(markdown_editor SOURCES src/app.cpp src/main.cpp
-    BUNDLE_NAME "Markdown Writer" BUNDLE_IDENTIFIER "org.huxerui.markdown.editor")
+    BUNDLE_NAME "Markdown Writer" BUNDLE_IDENTIFIER "org.huxerui.markdown.editor"
+    ${_writer_resource_output})
 if(TARGET HuxerUI::Markdown)
     huxerui_use_library(markdown_editor TARGET HuxerUI::Markdown)
 else()
