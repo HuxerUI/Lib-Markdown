@@ -1,5 +1,6 @@
 #include "app.h"
 #include <huxerui/markdown.h>
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <utility>
@@ -56,6 +57,15 @@ struct WriterSession {
   void Cancel() { pending.Cancel(); ++request; scheduled = false; latest.clear(); }
 };
 
+struct WriterTab {
+  std::string title;
+  TextEditingValue draft;
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+  std::shared_ptr<rich_text::detail::EditSession> editor;
+#endif
+  bool operator==(const WriterTab&) const = default;
+};
+
 bool Publish(const std::shared_ptr<WriterSession>& session, const std::string& source,
              State<MarkdownDocument> document, State<std::string> status) {
   try {
@@ -87,6 +97,9 @@ View App() {
   auto preview = UseState(true);
   auto dark = UseState(false);
   auto draft = UseState(TextEditingValue::FromText(initial_source));
+  auto tabs = UseState(std::vector<WriterTab>{{"开始写作", TextEditingValue::FromText(initial_source)}});
+  auto selected_tab = UseState(std::size_t{0});
+  auto next_tab_number = UseState(std::size_t{2});
   auto document = UseState(initial_document);
   auto status = UseState(std::string("点击正文、列表项或单元格开始编辑，Ctrl+Enter 完成。"));
   auto session = UseState(std::make_shared<WriterSession>());
@@ -108,6 +121,25 @@ View App() {
     auto style = MarkdownStyle::FromTheme(theme);
     style.body.font = style.body.font.WithSize(18);
     style.blank_line_height = 24;
+    const auto switch_tab = [=](std::size_t index) mutable {
+      if (index == selected_tab.Get() || index >= tabs.Get().size()) return;
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+      if (document_composing.Get()) { status = "请先完成输入法组合输入。"; return; }
+#endif
+      if (draft.Get().composition) { status = "请先完成输入法组合输入。"; return; }
+      session.Get()->Cancel();
+      auto updated = tabs.Get();
+      updated[selected_tab.Get()].draft = draft.Get();
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+      updated[selected_tab.Get()].editor = document_editor.Get();
+      document_editor = updated[index].editor;
+      document_active = false;
+#endif
+      draft = updated[index].draft;
+      tabs = std::move(updated);
+      selected_tab = index;
+      (void)Publish(session.Get(), draft.Get().text, document, status);
+    };
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
     const bool document_mode = document_active.Get();
 #else
@@ -219,10 +251,9 @@ View App() {
             status = "无法编辑：" + error;
           }).Key("writer-editor");
     }
-    return Column{
-      Row{
-        Text("Markdown Writer · 实验版").Style({Font::System(24).WithWeight(FontWeight::Bold), theme.colors.on_surface}).With(Grow{}),
-        Button(editing.Get() ? "原位编辑" : "编辑源码").OnClick([=]() mutable {
+    std::vector<StringVariant> tab_labels;
+    for (const auto& tab : tabs.Get()) tab_labels.emplace_back(tab.title);
+    toolbar.push_back(Button(editing.Get() ? "原位编辑" : "编辑源码").OnClick([=]() mutable {
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
           if (document_composing.Get()) { status = "请先完成输入法组合输入。"; return; }
 #endif
@@ -234,9 +265,9 @@ View App() {
 #endif
             editing = !editing.Get();
           }
-        }).Key("mode-toggle"),
+        }).Key("mode-toggle"));
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-        Button(document_mode ? "返回块内编辑" : "跨段编辑").OnClick([=]() mutable {
+    toolbar.push_back(Button(document_mode ? "返回块内编辑" : "跨段编辑").OnClick([=]() mutable {
           if (draft.Get().composition || document_composing.Get()) { status = "请先完成输入法组合输入。"; return; }
           if (document_active.Get()) {
             document_active = false;
@@ -262,20 +293,64 @@ View App() {
           } catch (const std::length_error& error) {
             status = std::string("无法跨段编辑：") + error.what();
           }
-        }).Key("document-mode-toggle"),
+        }).Key("document-mode-toggle"));
 #endif
-        Button(dark.Get() ? "浅色" : "深色").OnClick([dark]() mutable { dark = !dark.Get(); }).Key("writer-theme"),
-      }.With(Spacing(12.0F)),
-      Text("类 Typora 开发 demo · 保持排版直接编辑 · 点击离开或 Ctrl+Enter 完成")
-          .With(Foreground{theme.colors.on_surface_variant}),
-      Flow(std::move(toolbar)).With(Spacing(8.0F)),
-      Checkbox("源码实时预览", preview.Get()).OnChanged([preview](bool enabled) mutable { preview = enabled; }).Key("writer-preview-toggle"),
-      std::move(body).With(Grow{}, Padding(16.0F), Background{theme.colors.surface}, Border{theme.colors.outline, 0.5F}),
-      Text(status).With(Foreground{theme.colors.on_surface_variant}).Key("writer-status"),
-    }.With(Padding(compact ? 12.0F : 24.0F), Spacing(12.0F), CrossAlign(CrossAxisAlignment::Stretch), Background{theme.colors.background});
+    toolbar.push_back(Checkbox("实时预览", preview.Get()).OnChanged([preview](bool enabled) mutable { preview = enabled; }).Key("writer-preview-toggle"));
+    toolbar.push_back(Button(dark.Get() ? "浅色" : "深色").OnClick([dark]() mutable { dark = !dark.Get(); }).Key("writer-theme"));
+    return Column{
+      WindowTitleBar{
+        Text("Markdown Writer").Style({Font::System(16).WithWeight(FontWeight::Bold), theme.colors.on_surface}),
+        Tabs(std::move(tab_labels), selected_tab.Get()).OnChanged(switch_tab).With(Grow{}).Key("writer-tabs"),
+        Button("+").OnClick([=]() mutable {
+          if (draft.Get().composition) { status = "请先完成输入法组合输入。"; return; }
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+          if (document_composing.Get()) { status = "请先完成输入法组合输入。"; return; }
+#endif
+          session.Get()->Cancel();
+          auto updated = tabs.Get();
+          updated[selected_tab.Get()].draft = draft.Get();
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+          updated[selected_tab.Get()].editor = document_editor.Get();
+          document_editor = {};
+          document_active = false;
+#endif
+          const auto title = "文档 " + std::to_string(next_tab_number.Get());
+          next_tab_number = next_tab_number.Get() + 1;
+          updated.push_back({title, TextEditingValue::FromText("# " + title + "\n\n")});
+          selected_tab = updated.size() - 1;
+          draft = updated.back().draft;
+          tabs = std::move(updated);
+          (void)Publish(session.Get(), draft.Get().text, document, status);
+        }).Key("writer-new-tab"),
+        Button("×").OnClick([=]() mutable {
+          if (tabs.Get().size() == 1) return;
+          if (draft.Get().composition) { status = "请先完成输入法组合输入。"; return; }
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+          if (document_composing.Get()) { status = "请先完成输入法组合输入。"; return; }
+          document_active = false;
+#endif
+          session.Get()->Cancel();
+          auto updated = tabs.Get();
+          updated.erase(updated.begin() + selected_tab.Get());
+          const auto index = std::min(selected_tab.Get(), updated.size() - 1);
+          selected_tab = index;
+          draft = updated[index].draft;
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+          document_editor = updated[index].editor;
+#endif
+          tabs = std::move(updated);
+          (void)Publish(session.Get(), draft.Get().text, document, status);
+        }).Key("writer-close-tab"),
+      }.With(Padding(EdgeInsets::Symmetric(compact ? 8.0F : 16.0F, 4.0F)), Spacing(8.0F), Background{theme.colors.surface}),
+      Flow(std::move(toolbar)).With(Padding(EdgeInsets::Symmetric(compact ? 8.0F : 16.0F, 6.0F)), Spacing(8.0F)).Key("writer-toolbar"),
+      std::move(body).With(Grow{}, Padding(compact ? 8.0F : 16.0F), Background{theme.colors.surface}, Border{theme.colors.outline, 0.5F}),
+      Text(status).With(Padding(EdgeInsets::Symmetric(12.0F, 4.0F)), Foreground{theme.colors.on_surface_variant}).Key("writer-status"),
+    }.With(CrossAlign(CrossAxisAlignment::Stretch), Background{theme.colors.background});
   }));
 }
 } // namespace markdown_writer
 
 const huxerui::Application application{markdown_writer::App,
-    {.window = {.title = "Markdown Writer", .initial_size = {1180, 820}}, .show_debug_overlay = false}};
+    {.window = {.title = "Markdown Writer", .initial_size = {1180, 820},
+                .chrome_mode = huxerui::WindowChromeMode::Custom, .title_bar_height = 48.0F},
+     .show_debug_overlay = false}};
