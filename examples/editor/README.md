@@ -1,6 +1,6 @@
 # Markdown Writer：类 Typora 编辑体验开发 demo
 
-这是第二个独立桌面 demo，入口 `src/app.cpp`，目标程序 `markdown_editor`。
+这是第二个独立 demo，入口 `src/app.cpp`，目标程序 `markdown_editor`。
 现有 [Playground](../preview/README.md) 继续验证语法、扩展、流式和虚拟化；Writer 专门验证编辑体验。
 
 点击支持的段落、标题、列表项、引用或表格单元格即可保持排版直接编辑。输入时保留粗体、斜体和行内代码等样式。
@@ -8,6 +8,8 @@
 
 ## 当前可以验证
 
+- 自定义窗口标题栏中的文档标签可新增、切换和关闭；每个标签保留独立草稿、选区和跨段编辑会话。
+- 顶部快捷工具行集中提供格式、编辑模式、实时预览和主题操作；正文占据剩余空间。
 - 默认使用库的 MarkdownEditor。直接点击正文或单元格，也可用 Tab 聚焦。列表符号、序号、任务勾选和表格对齐随结构保留。
 - 显式留空的表格单元格可以点击输入。单元格文字可折行，按 Enter 完成当前格。
 - 图片、公式、脚注引用、剧透等未纳入富文本模型的行内内容暂回退为块内源码输入及预览。
@@ -45,6 +47,8 @@ cmake --build build-editor --config Release --parallel
 
 Windows/Linux 分发时保留 exe 旁的 `markdown_editor.resources`。macOS 分发整个 app bundle。
 Linux 单配置输出通常是 `build-editor/markdown_editor`，macOS 是 `markdown_editor.app`。
+推送 `v*` 标签时，`Release Markdown Writer` 工作流构建 Windows、Linux、macOS 三个包并附加到同名 GitHub Release；手动运行工作流只生成 Actions 构建产物。
+Linux 包依赖系统提供 GTK4、libepoxy 和 libsoup 3。Windows、macOS 包保留各自的资源目录或 app bundle。
 
 ## 跨段编辑实验
 
@@ -71,7 +75,7 @@ cmake --build build-writer-experiment --config Release --parallel
 独立配置增加 `-DHUXERUI_BUILD_TESTING_LIBRARY=ON -DHUXERUI_MARKDOWN_EDITOR_BUILD_TESTS=ON`，
 构建后运行 `ctest --test-dir build-editor -C Release --output-on-failure`。
 测试覆盖默认样例的嵌套任务编辑、Unicode 选区格式化、持续输入、模式切换、草稿保留、主题与窄窗口。
-CI 的独立 editor 作业还覆盖跨段编辑，产物为 `markdown-editor-windows`。
+CI 的独立 editor 作业还覆盖跨段编辑和多标签草稿隔离，产物为 `markdown-editor-windows`。
 
 后续按这些依赖顺序推进：
 

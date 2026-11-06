@@ -1,0 +1,83 @@
+name: Release Markdown Writer
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  writer:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows
+          - os: ubuntu-24.04
+            name: linux
+          - os: macos-latest
+            name: macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out paragraph geometry SDK
+        uses: actions/checkout@v4
+        with:
+          repository: FarnaHerry/HuxerUI
+          ref: e119529d4fe118b0b4df4a0a306df6819814d7a0
+          path: .cache/HuxerUI
+      - name: Add attributed TextField support
+        shell: pwsh
+        run: |
+          git -C .cache/HuxerUI fetch --no-tags https://github.com/HuxerUI/HuxerUI.git e29c3c2573dcd7db201e7523ff59803529875d52
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C .cache/HuxerUI cherry-pick --no-commit e29c3c2573dcd7db201e7523ff59803529875d52
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev libepoxy-dev libsoup-3.0-dev pkg-config ninja-build
+      - name: Configure Writer
+        shell: pwsh
+        run: cmake -S examples/editor -B build-writer-release -DHUXERUI_HOME="${{ github.workspace }}/.cache/HuxerUI" -DHUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE=ON
+      - name: Build Writer
+        run: cmake --build build-writer-release --config Release --target markdown_editor --parallel 2
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path build-writer-release/Release/markdown_editor.exe,build-writer-release/Release/markdown_editor.resources -DestinationPath markdown-writer-windows.zip
+      - name: Package Linux
+        if: runner.os == 'Linux'
+        run: tar -C build-writer-release -czf markdown-writer-linux.tar.gz markdown_editor markdown_editor.resources
+      - name: Package macOS
+        if: runner.os == 'macOS'
+        run: ditto -c -k --sequesterRsrc --keepParent build-writer-release/markdown_editor.app markdown-writer-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: markdown-writer-${{ matrix.name }}
+          path: markdown-writer-*
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: writer
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: markdown-writer-*
+          merge-multiple: true
+          path: dist
+      - name: Attach Writer packages to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null || gh release create "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
