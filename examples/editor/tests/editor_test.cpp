@@ -25,8 +25,12 @@ int main(int argc, char** argv) { return Run([&] {
   const auto advance = [&](int ms) { ui.Pump(std::chrono::milliseconds(ms)); ui.Pump(); };
   CHECK(ui.Find(UiSelector::Value("开始写作")).Exists());
   CHECK(!ui.Find(UiSelector::Key("writer-source")).Exists());
-  ui.Find(UiSelector::Value("开始写作")).Tap();
   auto block = ui.Find(UiSelector::AllOf(UiSelector::Key("markdown-block-input"), UiSelector::Focused(true)));
+  ui.Find(UiSelector::Value("嵌套任务保留缩进和勾选状态")).Tap();
+  CHECK(block.One().value == "嵌套任务保留缩进和勾选状态");
+  block.ReplaceText("任务已原位修改");
+  CHECK(!ui.Find(UiSelector::Key("markdown-block-preview")).Exists());
+  ui.Find(UiSelector::Value("开始写作")).Tap();
   CHECK(block.One().value == "开始写作");
   block.ReplaceText("原位输入😀");
   CHECK(block.One().value == "原位输入😀");
@@ -34,6 +38,7 @@ int main(int argc, char** argv) { return Run([&] {
   ui.Find(UiSelector::Key("mode-toggle")).Tap();
   auto source = ui.Find(UiSelector::Key("writer-source"));
   CHECK(source.One().value->starts_with("# 原位输入😀\n"));
+  CHECK(source.One().value->find("  - [x] 任务已原位修改\n") != std::string::npos);
   source.Tap();
   source.ReplaceText("中文😀");
   source.SetSelection({0, 4});

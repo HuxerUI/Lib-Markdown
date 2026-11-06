@@ -158,9 +158,9 @@ Windows/Visual Studio 下运行 `build-preview/Release/markdown_preview.exe`，
 并保留旁边的 `markdown_preview.resources` 目录。CI 会提供 Windows demo artifact。
 
 第二个 [Markdown Writer](examples/editor/README.md) 位于 `examples/editor`，是类 Typora
-体验的实验版：默认使用库的 `MarkdownEditor`，直接编辑排版后的段落/标题，保持粗体、斜体等样式，
-编辑时隐藏 Markdown 标记。文字、光标和输入法共用原生富文本布局。其他结构通过源码模式修改。
-尚无跨块编辑、统一撤销重做和自动保存；详见[块级编辑接口](docs/block-editing.md)和[后续讨论记录](docs/editor-follow-up.md)。
+体验的实验版。默认使用库的 `MarkdownEditor`，可直接编辑排版后的段落、标题、列表项、引用和表格单元格。
+文字、光标和输入法共用原生富文本布局。代码块和复杂内容使用原位源码输入，结构修改使用全文源码模式。
+具体支持范围和后续任务见[块级编辑接口](docs/block-editing.md)和[后续记录](docs/editor-follow-up.md)。
 
 ```powershell
 cmake -S examples/editor -B build-editor -DHUXERUI_HOME=/path/to/HuxerUI

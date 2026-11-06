@@ -1,7 +1,10 @@
 #include <huxerui/markdown/editing.h>
 #include <algorithm>
+#include <array>
 #include <stdexcept>
 #include <string_view>
+
+#include "editing_internal.h"
 
 namespace huxerui::markdown {
 namespace {
@@ -23,6 +26,54 @@ void ValidateEditingValue(const TextEditingValue& value) {
     throw std::invalid_argument("Invalid Markdown selection affinity");
   if (value.composition) (void)text.TextInRange(*value.composition);
 }
+
+void ReplaceNestedContent(MarkdownNode& root, std::span<const std::size_t> path,
+                          std::string_view source, ParseOptions options) {
+  if (source.find_first_of("\r\n") != std::string_view::npos)
+    throw std::invalid_argument("Nested Markdown content requires a single line");
+  auto* parent = &root;
+  for (const auto index : path.first(path.size() - 1)) parent = &parent->children[index];
+  auto& leaf = parent->children[path.back()];
+  if (detail::IsTableCell(leaf.kind)) {
+    auto cell = detail::ParseTableCell(source, options);
+    if (!cell) throw std::invalid_argument("Markdown edit must stay inside the table cell");
+    leaf.children = std::move(cell->children);
+    return;
+  }
+  const auto local_source = leaf.kind == NodeKind::Heading
+      ? std::string(leaf.heading_level, '#') + " " + std::string(source) : std::string(source);
+  const auto parsed = ParseMarkdown(local_source, options);
+  const auto& children = parsed.Root().children;
+  if (leaf.kind == NodeKind::Paragraph && children.empty()) {
+    parent->children.erase(parent->children.begin() + path.back());
+    return;
+  }
+  if (children.size() != 1 || children.front().kind != leaf.kind)
+    throw std::invalid_argument("Markdown edit must stay inside the current text block");
+  leaf = children.front();
+}
+}
+
+std::optional<MarkdownNode> detail::ParseTableCell(std::string_view source, ParseOptions options) {
+  if (source.find_first_of("\r\n") != std::string_view::npos) return std::nullopt;
+  options.source_ranges = true;
+  // The wrapper is verification syntax and does not count toward document input limits.
+  auto wrapped = "| " + std::string(source) + " |\n| --- |";
+  options.max_input_bytes = std::max(options.max_input_bytes, wrapped.size());
+  const auto table = ParseMarkdown(wrapped, options);
+  const auto& blocks = table.Root().children;
+  if (blocks.size() != 1 || blocks.front().kind != NodeKind::Table) return std::nullopt;
+  const auto& cells = blocks.front().children.front().children.front().children;
+  if (cells.size() != 1) return std::nullopt;
+  // MD4C ignores surplus cells. Verify that it consumed the entire fragment
+  // as one cell before accepting a write that could hide text after a pipe.
+  const auto first = source.find_first_not_of(" \t");
+  if (first != std::string_view::npos) {
+    const auto range = table.SourceRange(std::array<std::size_t, 4>{0, 0, 0, 0});
+    if (!range || range->start_byte != first + 2 || range->end_byte != source.find_last_not_of(" \t") + 3)
+      return std::nullopt;
+  }
+  return cells.front();
 }
 
 TextEditingValue ApplyMarkdownCommand(const TextEditingValue& value, MarkdownEditCommand command) {
@@ -108,52 +159,68 @@ std::string_view MarkdownBlockEditSession::Source() const noexcept { return pars
 const MarkdownDocument& MarkdownBlockEditSession::Document() const noexcept { return parser_.Document(); }
 const MarkdownDocument& MarkdownBlockEditSession::LayoutDocument() const noexcept { return layout_document_; }
 std::string_view MarkdownBlockEditSession::LayoutSource() const noexcept { return layout_source_; }
-std::optional<std::size_t> MarkdownBlockEditSession::EditingBlock() const noexcept { return block_; }
+std::optional<std::size_t> MarkdownBlockEditSession::EditingBlock() const noexcept {
+  return path_.empty() ? std::nullopt : std::optional{path_.front()};
+}
 const TextEditingValue& MarkdownBlockEditSession::EditingValue() const noexcept { return value_; }
 void MarkdownBlockEditSession::UpdateSource(std::string_view source) {
   if (source == Source()) return;
-  if (block_ && value_.composition) throw std::logic_error("Finish IME composition before replacing Markdown source");
+  if (!path_.empty() && value_.composition) throw std::logic_error("Finish IME composition before replacing Markdown source");
   std::string owned(source);
   const auto next = parser_.Update(owned);
   layout_source_.swap(owned);
   layout_document_ = next;
-  block_.reset();
+  path_.clear();
   value_ = {};
 }
 void MarkdownBlockEditSession::BeginEdit(std::size_t block) {
-  if (block_ == block) return;
-  if (block_ && value_.composition) throw std::logic_error("Finish IME composition before switching Markdown blocks");
-  // A new index always addresses the latest document, not the frozen layout.
-  const auto range = Document().TopLevelSourceRange(block);
+  BeginEdit(std::span(&block, 1));
+}
+void MarkdownBlockEditSession::BeginEdit(std::span<const std::size_t> path) {
+  if (!path.empty() && std::ranges::equal(path_, path)) return;
+  if (!path_.empty() && value_.composition) throw std::logic_error("Finish IME composition before switching Markdown blocks");
+  const auto range = Document().SourceRange(path);
   if (!range) throw std::invalid_argument("Markdown block has no verified editable source range");
+  std::vector<std::size_t> owned_path(path.begin(), path.end());
   auto value = TextEditingValue::FromText(std::string(Source().substr(range->start_byte, range->end_byte - range->start_byte)));
   std::string source(Source());
   layout_source_.swap(source);
   layout_document_ = Document();
-  block_ = block;
+  path_.swap(owned_path);
   range_ = *range;
   value_ = std::move(value);
 }
 void MarkdownBlockEditSession::UpdateEdit(const TextEditingValue& value) {
-  if (!block_) throw std::logic_error("No Markdown block is being edited");
+  if (path_.empty()) throw std::logic_error("No Markdown block is being edited");
   ValidateEditingValue(value);
   auto owned = value;
   const auto end = range_.start_byte + value.text.size();
-  (void)parser_.ApplyEdit({range_.start_byte, range_.end_byte - range_.start_byte, value.text});
+  const MarkdownEdit edit{range_.start_byte, range_.end_byte - range_.start_byte, value.text};
+  if (path_.size() > 1 && value.text != value_.text) {
+    auto options = options_;
+    options.source_ranges = false;
+    auto expected = layout_document_.Root();
+    ReplaceNestedContent(expected, path_, value.text, options);
+    (void)parser_.ApplyEdit(edit, [&](const MarkdownDocument& next) {
+      if (next.Root() != expected) throw std::invalid_argument("Markdown edit would change surrounding structure");
+    });
+  } else {
+    (void)parser_.ApplyEdit(edit);
+  }
   range_.end_byte = end;
   value_ = std::move(owned);
 }
 void MarkdownBlockEditSession::ApplyCommand(MarkdownEditCommand command) {
-  if (!block_) throw std::logic_error("No Markdown block is being edited");
+  if (path_.empty()) throw std::logic_error("No Markdown block is being edited");
   UpdateEdit(ApplyMarkdownCommand(value_, command));
 }
 void MarkdownBlockEditSession::EndEdit() {
-  if (!block_) return;
+  if (path_.empty()) return;
   if (value_.composition) throw std::logic_error("Finish IME composition before ending Markdown block editing");
   std::string source(Source());
   layout_source_.swap(source);
   layout_document_ = Document();
-  block_.reset();
+  path_.clear();
   value_ = {};
 }
 } // namespace huxerui::markdown

@@ -55,6 +55,11 @@ Public API normalization; rebuild the library and applications together. See
   cancellation and bounded recent formatting restoration for native text undo.
   Verify generated Markdown with MD4C, keep neighbouring source bytes unchanged,
   and restore accepted content when a native proposal cannot be serialized.
+- Enable attributed editing in nested list items, quotes, admonitions, footnote
+  bodies and explicit table cells. Preserve enclosing syntax and validate nested
+  replacements before publishing the document. Offer source fallback for verified
+  code blocks and complex containers. Collect original offsets through a local MD4C observer.
+- Share inline style resolution and link appearance between the preview and Writer.
 - Require HuxerUI TextField::TextStyles; publish the SDK change on its own feature
   branch and pin verified commit e29c3c2573dcd7db201e7523ff59803529875d52 in CI.
 - Add opt-in Spoiler AST/native click-to-reveal spans, granular URL/email/WWW

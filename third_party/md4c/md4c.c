@@ -269,6 +269,7 @@ struct MD_CTX_tag {
     /* Pending count of blank lines not yet reported as MD_BLOCK_BLANK.
      * Used only with MD_FLAG_PRESERVEBLANKLINES. */
     unsigned n_blank_lines;
+    OFF source_line_begin;
 
     /* For container block analysis. */
     MD_CONTAINER* containers;
@@ -5266,6 +5267,8 @@ md_process_table_cell(MD_CTX* ctx, MD_BLOCKTYPE cell_type, MD_ALIGN align, OFF b
     line.end = end;
 
     MD_ENTER_BLOCK(cell_type, &det);
+    if(ctx->parser.block_source != NULL && (beg != 0 || end != 0))
+        MD_CHECK(ctx->parser.block_source(cell_type, beg, end, end, 1, ctx->userdata));
     MD_CHECK(md_process_normal_block_contents(ctx, &line, 1));
     MD_LEAVE_BLOCK(cell_type, &det);
 
@@ -5399,6 +5402,8 @@ struct MD_BLOCK_tag {
      * MD_BLOCK_OL:     Start item number.
      */
     MD_SIZE n_lines;
+    /* Lib-Markdown source observer: container opener or omitted leaf tail. */
+    OFF source_edge;
 };
 
 struct MD_CONTAINER_tag {
@@ -5620,6 +5625,21 @@ md_process_leaf_block(MD_CTX* ctx, MD_BLOCK* block)
     if(!is_in_tight_list  ||  block->type != MD_BLOCK_P)
         MD_ENTER_BLOCK(block->type, (void*) &det);
 
+    if(ctx->parser.block_source != NULL && block->n_lines > 0) {
+        OFF beg, end;
+        if(block->type == MD_BLOCK_CODE || block->type == MD_BLOCK_HTML) {
+            const MD_VERBATIMLINE* lines = (const MD_VERBATIMLINE*)(block + 1);
+            beg = lines[0].beg;
+            end = lines[block->n_lines - 1].end;
+        } else {
+            const MD_LINE* lines = (const MD_LINE*)(block + 1);
+            beg = lines[0].beg;
+            end = lines[block->n_lines - 1].end;
+        }
+        MD_CHECK(ctx->parser.block_source(block->type, beg, end, MAX(end, block->source_edge),
+                                          block->n_lines, ctx->userdata));
+    }
+
     /* Process the block contents accordingly to is type. */
     switch(block->type) {
         case MD_BLOCK_HR:
@@ -5728,6 +5748,10 @@ md_process_all_blocks(MD_CTX* ctx)
 
             if(block->flags & MD_BLOCK_CONTAINER_OPENER) {
                 MD_ENTER_BLOCK(block->type, &det);
+                if(ctx->parser.block_source != NULL) {
+                    OFF beg = block->source_edge;
+                    MD_CHECK(ctx->parser.block_source(block->type, beg, beg, beg, 0, ctx->userdata));
+                }
 
                 if(block->type == MD_BLOCK_UL || block->type == MD_BLOCK_OL) {
                     ctx->containers[ctx->n_containers].is_loose = (block->flags & MD_BLOCK_LOOSE_LIST) ? true : false;
@@ -5839,6 +5863,7 @@ md_start_new_block(MD_CTX* ctx, const MD_LINE_ANALYSIS* line)
     block->flags = 0;
     block->data = line->data;
     block->n_lines = 0;
+    block->source_edge = 0;
 
     ctx->current_block = block;
     return 0;
@@ -5960,6 +5985,8 @@ md_end_current_block(MD_CTX* ctx)
 
         if(n_lines > 1) {
             /* Get rid of the underline. */
+            const MD_LINE* lines = (const MD_LINE*)(ctx->current_block + 1);
+            ctx->current_block->source_edge = lines[n_lines-1].end;
             ctx->current_block->n_lines--;
             ctx->n_block_bytes -= sizeof(MD_LINE);
         } else {
@@ -6047,6 +6074,7 @@ md_push_container_bytes(MD_CTX* ctx, MD_BLOCKTYPE type, unsigned start,
     block->flags = flags;
     block->data = data;
     block->n_lines = start;
+    block->source_edge = ctx->source_line_begin;
 
 abort:
     return ret;
@@ -6691,6 +6719,7 @@ md_analyze_line(MD_CTX* ctx, OFF beg, OFF* p_end,
     int n_implicit_parents_end = 0;
     int ret = 0;
 
+    ctx->source_line_begin = beg;
     line->indent = md_line_indentation(ctx, total_indent, off, &off);
     total_indent += line->indent;
     line->beg = off;
@@ -6759,6 +6788,8 @@ md_analyze_line(MD_CTX* ctx, OFF beg, OFF* p_end,
              * which we transform into MD_LINE_BLANK. */
             if(line->indent < ctx->code_indent_offset) {
                 if(md_is_closing_code_fence(ctx, CH(pivot_line->beg), off, &off)) {
+                    if(ctx->current_block != NULL && ctx->current_block->type == MD_BLOCK_CODE)
+                        ctx->current_block->source_edge = off;
                     line->type = MD_LINE_BLANK;
                     ctx->last_line_has_list_loosening_effect = false;
                     break;
@@ -7300,6 +7331,11 @@ md_process_footnote_def(MD_CTX* ctx, MD_FOOTNOTE_DEF* def)
                                 &det.label, &label_build));
 
     MD_ENTER_BLOCK(MD_BLOCK_FOOTNOTE_DEF, &det);
+    if(ctx->parser.block_source != NULL && def->n_content_lines > 0) {
+        OFF beg = def->content_lines[0].beg;
+        OFF end = def->content_lines[def->n_content_lines - 1].end;
+        MD_CHECK(ctx->parser.block_source(MD_BLOCK_P, beg, end, end, def->n_content_lines, ctx->userdata));
+    }
     MD_CHECK(md_process_normal_block_contents(ctx, def->content_lines,
                                               def->n_content_lines));
     MD_LEAVE_BLOCK(MD_BLOCK_FOOTNOTE_DEF, &det);

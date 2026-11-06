@@ -36,7 +36,7 @@ struct MarkdownRichTextRun {
   std::vector<MarkdownTextMark> marks;
 };
 
-/// Display-text editing model for paragraphs/headings with supported inline marks.
+/// Display-text editing model for paragraphs, headings and table cells with supported inline marks.
 /// Input coordinates are visible UTF-16 positions, excluding Markdown delimiters.
 /// Replacements inherit the first replaced character's marks, or the preceding
 /// character's marks at an insertion boundary. Composition cancellation restores
@@ -70,9 +70,9 @@ private:
 };
 
 /// Thread-confined block editing model. Source remains authoritative and is never
-/// reconstructed from the AST. Only verified root paragraphs/headings can begin
-/// an edit; their replacement may create any Markdown structure, including several
-/// blocks. LayoutDocument/LayoutSource stay frozen until EndEdit so the active
+/// reconstructed from the AST. A root replacement can create any Markdown
+/// structure. Nested edits address single-line content and preserve the rest of
+/// the tree. LayoutDocument/LayoutSource stay frozen until EndEdit so the active
 /// native TextField can retain its identity, selection and IME session.
 class MarkdownBlockEditSession final {
 public:
@@ -82,12 +82,14 @@ public:
   [[nodiscard]] const MarkdownDocument& LayoutDocument() const noexcept;
   [[nodiscard]] std::string_view LayoutSource() const noexcept;
   [[nodiscard]] std::optional<std::size_t> EditingBlock() const noexcept;
+  [[nodiscard]] std::span<const std::size_t> EditingPath() const noexcept { return path_; }
   [[nodiscard]] const TextEditingValue& EditingValue() const noexcept;
   /// Update the whole source, ending any block edit. Equal source is a no-op.
   /// Composition must finish before changing source or ending/switching blocks.
   /// All parsing/input failures preserve the previous source and editing value.
   void UpdateSource(std::string_view source);
   void BeginEdit(std::size_t block);
+  void BeginEdit(std::span<const std::size_t> path);
   void UpdateEdit(const TextEditingValue& value);
   void ApplyCommand(MarkdownEditCommand command);
   void EndEdit();
@@ -96,7 +98,7 @@ private:
   MarkdownParseSession parser_;
   MarkdownDocument layout_document_;
   std::string layout_source_;
-  std::optional<std::size_t> block_;
+  std::vector<std::size_t> path_;
   MarkdownSourceRange range_;
   TextEditingValue value_;
 };

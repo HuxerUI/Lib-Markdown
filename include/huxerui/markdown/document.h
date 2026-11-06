@@ -1,10 +1,13 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace huxerui::markdown {
@@ -103,8 +106,8 @@ struct ParseOptions {
   bool math = false;
   /// Emit BlankLines nodes for runs reported by MD4C; not lossless source retention.
   bool preserve_blank_lines = false;
-  /// Collect conservative, verified ranges for editable root paragraphs/headings.
-  /// Adds fragment parsing work; unavailable/ambiguous blocks have no range.
+  /// Collect source coordinates for editing. Container boundaries may require
+  /// fragment verification; unavailable or synthesized nodes have no range.
   bool source_ranges = false;
   bool spoilers = false; ///< ||hidden text||; visual concealment, not data protection.
   bool collapse_whitespace = false; ///< Collapse nontrivial ordinary whitespace; code remains literal.
@@ -143,16 +146,21 @@ public:
   [[nodiscard]] const MarkdownNode& Root() const noexcept;
   /// Returns owned UTF-8 text without markup.
   [[nodiscard]] std::string PlainText() const;
-  /// Optional source interval including Markdown markers, excluding the final EOL.
-  /// Only when source_ranges was enabled. Nested/unsupported/ambiguous blocks
-  /// return nullopt. Indices address Root().children; invalid indices throw.
+  /// Optional source interval including block markers, excluding the final EOL.
+  /// Collected when source_ranges is enabled. Indices address Root().children;
+  /// invalid indices throw.
   [[nodiscard]] std::optional<MarkdownSourceRange> TopLevelSourceRange(std::size_t index) const;
+  /// Child indices from Root() to an editable node. A nested paragraph,
+  /// single-line heading, or explicit table cell starts at its inline Markdown.
+  /// A multi-line paragraph can include interior prefixes and line breaks.
+  /// Synthesized cells and the root have no range. Invalid paths throw.
+  [[nodiscard]] std::optional<MarkdownSourceRange> SourceRange(std::span<const std::size_t> path) const;
   /// Snapshot identity equality; separately parsed equivalent ASTs need not be equal.
   bool operator==(const MarkdownDocument&) const noexcept = default;
 
 private:
   struct Storage;
-  explicit MarkdownDocument(MarkdownNode root, std::vector<std::optional<MarkdownSourceRange>> ranges = {});
+  explicit MarkdownDocument(std::shared_ptr<const Storage> storage) : storage_(std::move(storage)) {}
   std::shared_ptr<const Storage> storage_;
   friend MarkdownDocument ParseMarkdown(std::string_view, ParseOptions);
   friend class MarkdownParseSession;
@@ -218,8 +226,12 @@ public:
   [[nodiscard]] MarkdownParseStats LastParseStats() const noexcept;
 
 private:
+  using ValidateDocument = std::function<void(const MarkdownDocument&)>;
+  MarkdownDocument Update(std::string_view source, const ValidateDocument& validate);
+  MarkdownDocument ApplyEdit(const MarkdownEdit& edit, const ValidateDocument& validate);
   struct Impl;
   std::unique_ptr<Impl> impl_;
+  friend class MarkdownBlockEditSession;
 };
 
 /// Synchronous incremental Markdown input accepting arbitrary UTF-8 byte chunks.

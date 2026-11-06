@@ -158,7 +158,7 @@ struct MarkdownEditorOptions {
   /// directly without a duplicate preview. Fragment previews have local reference scope.
   bool live_preview = true;
   /// Edit supported inline content directly with its typography and hidden markers.
-  /// Unsupported blocks retain in-place source editing. Edited blocks are serialized
+  /// Other blocks with a verified source range offer in-place source editing. Edited blocks are serialized
   /// semantically; source spelling inside that block can change.
   bool rich_text = true;
 };
@@ -171,11 +171,11 @@ struct MarkdownEditorEvents {
   struct Error : Event<void(const std::string&)> {};
 };
 
-/// Owns virtual scrolling and requires bounded height. Click/Tab into a paragraph
-/// to edit; blur or Ctrl+Enter finishes it (never while IME composition is active).
+/// Owns virtual scrolling and requires bounded height. Click/Tab into an editable
+/// block, list item, quote paragraph or cell. Blur or Ctrl+Enter finishes the edit
+/// after any IME composition.
 /// Uses one attributed native paragraph for painting, hit testing, caret and IME.
-/// The native editor owns the active block's text history, with a bounded semantic
-/// formatting cache. Cross-block undo and nested/table editing are not yet provided.
+/// Each mounted field owns its text history, with a bounded semantic formatting cache.
 /// An empty document presents one native source field so writing can begin.
 [[nodiscard]] View MarkdownEditor(TextEditingValue value, MarkdownEditorOptions options = {});
 [[nodiscard]] inline View MarkdownEditor(const State<TextEditingValue>& value, MarkdownEditorOptions options = {}) {

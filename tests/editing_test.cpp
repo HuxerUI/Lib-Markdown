@@ -1,5 +1,6 @@
 #include <huxerui/markdown.h>
 #include "test.h"
+#include <array>
 
 using namespace huxerui;
 using namespace huxerui::markdown;
@@ -85,11 +86,32 @@ int main() { return Run([] {
   CHECK(session.LayoutDocument() == session.Document());
   CHECK(session.Source() == "# keep\r\n\r\n## changed\n\nnew paragraph\n\n- new list\r\n\r\n- untouched\r\n");
   const auto stable = std::string(session.Source());
-  Throws<std::invalid_argument>([&] { session.BeginEdit(3); });
+  Throws<std::invalid_argument>([&] { session.BeginEdit(std::span<const std::size_t>{}); });
   CHECK(session.Source() == stable);
   Throws<std::logic_error>([&] { session.UpdateEdit(value); });
   MarkdownBlockEditSession limited("body", {.max_input_bytes = 10});
   limited.BeginEdit(0);
   Throws<std::length_error>([&] { limited.UpdateEdit(TextEditingValue::FromText(std::string(11, 'a'))); });
   CHECK(limited.Source() == "body" && limited.EditingValue().text == "body");
+  MarkdownBlockEditSession list_items("3) **first**\r\n   - [x] nested\r\n4) same\r\n");
+  list_items.BeginEdit(std::array<std::size_t, 3>{0, 0, 0});
+  CHECK(list_items.EditingValue().text == "**first**");
+  list_items.UpdateEdit(TextEditingValue::FromText("**first中文😀**"));
+  CHECK(list_items.Source() == "3) **first中文😀**\r\n   - [x] nested\r\n4) same\r\n");
+  const auto before = list_items.Document();
+  Throws<std::invalid_argument>([&] { list_items.UpdateEdit(TextEditingValue::FromText("- another list")); });
+  Throws<std::invalid_argument>([&] { list_items.UpdateEdit(TextEditingValue::FromText("a\nb")); });
+  CHECK(list_items.Document() == before);
+  list_items.BeginEdit(std::array<std::size_t, 5>{0, 0, 1, 0, 0});
+  CHECK(list_items.EditingValue().text == "nested");
+  list_items.UpdateEdit(TextEditingValue::FromText("child"));
+  CHECK(list_items.Source() == "3) **first中文😀**\r\n   - [x] child\r\n4) same\r\n");
+  MarkdownBlockEditSession table("| A | B |\r\n| --- | ---: |\r\n| c |  |\r\n");
+  table.BeginEdit(std::array<std::size_t, 4>{0, 1, 0, 1});
+  CHECK(table.EditingValue().text.empty());
+  table.UpdateEdit(TextEditingValue::FromText("中\\|😀"));
+  CHECK(table.Source() == "| A | B |\r\n| --- | ---: |\r\n| c |  中\\|😀|\r\n");
+  const auto accepted_table = table.Document();
+  Throws<std::invalid_argument>([&] { table.UpdateEdit(TextEditingValue::FromText("a|b")); });
+  CHECK(table.Document() == accepted_table);
 }); }

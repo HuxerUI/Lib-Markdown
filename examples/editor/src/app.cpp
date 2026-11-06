@@ -10,18 +10,27 @@ using namespace huxerui::markdown;
 
 const std::string initial_source = R"md(# 开始写作
 
-这是类 Typora 编辑体验的开发 demo。直接点击排版后的文字编辑，标题、粗体、斜体在输入时保持样式。
+这是类 Typora 编辑体验的开发 demo。直接点击标题、列表正文、引用或表格单元格，输入时保持样式。
 
 ## 试一试
 
 点击这一段，在 **粗体**、*斜体* 或 `代码` 中修改文字，点击其他位置或按 Ctrl+Enter 完成编辑。
 
-- 完整保存 TextEditingValue 的选区与输入法状态
-- 连续输入时每 120 ms 合并更新预览
-- 原位编辑使用顶层块虚拟化；列表、表格暂时通过「编辑源码」修改
+- 点击 **列表正文** 直接修改
+  - [x] 嵌套任务保留缩进和勾选状态
+- 连续输入时实时更新内容和选区
 
 > [!NOTE]
 > 工具栏命令来自 Lib-Markdown，编辑模式不是独立的一套解析器。
+
+| 内容 | 状态 |
+| --- | ---: |
+| **点这里编辑** | 可修改 |
+| 空单元格 → |  |
+
+```cpp
+const auto greeting = "Hello, Markdown";
+```
 
 阅读 [项目文档](../guide.md)，也可以输入行内公式源码 $x^2$。
 )md";
@@ -74,7 +83,7 @@ View App() {
   auto dark = UseState(false);
   auto draft = UseState(TextEditingValue::FromText(initial_source));
   auto document = UseState(initial_document);
-  auto status = UseState(std::string("点击段落或标题开始编辑；Ctrl+Enter 完成。"));
+  auto status = UseState(std::string("点击正文、列表项或单元格开始编辑，Ctrl+Enter 完成。"));
   auto session = UseState(std::make_shared<WriterSession>());
   auto tasks = UseTaskScope();
   auto scroll = UseScrollController();

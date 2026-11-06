@@ -468,6 +468,13 @@ typedef struct MD_PARSER {
     /* Reserved. Set to NULL.
      */
     void (*syntax)(void);
+
+    /* Lib-Markdown source observer, optional. Reports the physical line start
+     * for container openers (line_count == 0) or original bounds for leaves.
+     * syntax_end includes an omitted Setext underline or closing code fence.
+     * Multi-line ranges can contain intervening container prefixes. */
+    int (*block_source)(MD_BLOCKTYPE /*type*/, MD_OFFSET /*beg*/, MD_OFFSET /*end*/,
+                        MD_OFFSET /*syntax_end*/, MD_SIZE /*line_count*/, void* /*userdata*/);
 } MD_PARSER;
 
 

@@ -1,7 +1,7 @@
 # MD4C 能力接入与接口约定
 
 本轮按“行内样式 → 页面链接 → 容器 → 全局脚注”的顺序接入六项已有能力。
-沿用内置 MD4C `f9e5eb232b95b737373ae706648cb75bd259ed1a`，第三方源码不变。
+内置 MD4C 基于 `f9e5eb232b95b737373ae706648cb75bd259ed1a`。编辑器使用内部位置观察回调。
 公式排版、可编辑文档模型等后续项没有预留空接口。
 
 ## 接口依据
@@ -65,7 +65,7 @@ parse.collapse_whitespace = true;
 这是开发阶段的破坏性 API 更新，旧 `.autolinks = false` 改为 `{false, false, false}`。
 宽松标题接受 `#heading`；禁用缩进代码后围栏代码仍工作；普通空白折叠保留代码、公式和实体。
 当前 MD4C 的 COLLAPSEWHITESPACE 标记存在制表符分隔丢失，故由适配层折叠普通文本，
-第三方源码未改动。默认三个选项均不改变原语法行为。
+默认三个选项延续原有语法行为。
 
 `spoilers=true` 识别 `||text||` 并生成 Spoiler 节点。普通/虚拟视图使用 `MarkdownStyle::spoiler_cover`
 遮盖，点击、键盘链接激活或辅助功能 Activate 可独立揭示；揭示后内部链接恢复正常事件。
@@ -141,7 +141,7 @@ return Markdown(document)
 | HTML 输出/执行 | 不在原生控件范围；不因扩展语法而开启 |
 
 MD4C 的 syntax 字段是保留字段，不是语法插件接口。未来自定义语法另行设计，保持第三方代码
-与应用扩展层分离。[Writer demo](../examples/editor/README.md) 已支持段落/标题保持排版直接编辑，
+与应用扩展层分离。[Writer demo](../examples/editor/README.md) 支持正文与表格单元格保持排版直接编辑，
 保守源码区间、语义格式模型和块编辑会话均在库层；统一事务仍待实现。
 见[块级编辑](block-editing.md)和[后续讨论](editor-follow-up.md)。
 

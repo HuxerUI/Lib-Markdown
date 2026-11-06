@@ -96,7 +96,12 @@ std::string Attribute(const MD_ATTRIBUTE& attribute) {
   return result;
 }
 
-bool IsBlock(NodeKind kind);
+using LocatedSource = std::pair<std::vector<std::size_t>, MarkdownSourceRange>;
+
+struct BlockSources {
+  std::optional<MarkdownSourceRange> whole;
+  std::vector<LocatedSource> leaves;
+};
 
 struct Builder {
   struct Restart {
@@ -108,7 +113,9 @@ struct Builder {
   std::vector<MarkdownNode*> stack{&root};
   std::string_view source;
   std::vector<Restart> restarts;
-  std::vector<std::optional<MarkdownSourceRange>> ranges;
+  std::vector<BlockSources> ranges;
+  std::vector<std::size_t> path;
+  bool implicit_paragraph = false;
   bool first_content = true;
   bool collapsed_space = false;
   ParseOptions options;
@@ -119,26 +126,46 @@ struct Builder {
     catch (...) { error = std::current_exception(); return 1; }
   }
 
-  MarkdownNode& Push(NodeKind kind) {
-    if (stack.size() > options.max_nesting) throw std::length_error("Markdown nesting limit exceeded");
+  MarkdownNode& Push(NodeKind kind, bool implicit = false) {
+    if (!implicit && stack.size() - implicit_paragraph > options.max_nesting)
+      throw std::length_error("Markdown nesting limit exceeded");
+    if (options.source_ranges) path.push_back(stack.back()->children.size());
     auto& node = stack.back()->children.emplace_back();
     node.kind = kind;
     stack.push_back(&node);
     return node;
   }
 
-  void RecordSource(const char* text, std::size_t size) {
-    if (!options.source_ranges || stack.size() < 2 || !size) return;
-    const auto kind = stack[1]->kind;
-    if (kind != NodeKind::Paragraph && kind != NodeKind::Heading) return;
-    const auto base = reinterpret_cast<std::uintptr_t>(source.data());
-    const auto pointer = reinterpret_cast<std::uintptr_t>(text);
-    // MD4C also emits synthetic text (breaks, replacements, normalized code).
-    if (pointer < base || pointer - base >= source.size() || size > source.size() - (pointer - base)) return;
-    auto& range = ranges.back();
-    const auto start = static_cast<std::size_t>(pointer - base);
-    if (!range) range = MarkdownSourceRange{start, start + size};
-    else { range->start_byte = std::min(range->start_byte, start); range->end_byte = std::max(range->end_byte, start + size); }
+  void Pop() {
+    stack.pop_back();
+    if (options.source_ranges) path.pop_back();
+  }
+
+  void OpenImplicitParagraph() {
+    const auto kind = stack.back()->kind;
+    if (kind != NodeKind::ListItem && kind != NodeKind::FootnoteDefinition) return;
+    Push(NodeKind::Paragraph, true);
+    implicit_paragraph = true;
+  }
+
+  void CloseImplicitParagraph() {
+    if (!implicit_paragraph) return;
+    Pop();
+    implicit_paragraph = false;
+  }
+
+  void RecordBlockSource(MD_BLOCKTYPE type, MarkdownSourceRange content, std::size_t syntax_end, unsigned lines) {
+    if (content.start_byte > content.end_byte || syntax_end > source.size()) return;
+    if (type == MD_BLOCK_P && content.start_byte != content.end_byte) OpenImplicitParagraph();
+    auto& block = ranges.back();
+    if (stack[1]->kind != NodeKind::FootnoteSection) {
+      if (!block.whole) block.whole = MarkdownSourceRange{content.start_byte, syntax_end};
+      else block.whole->end_byte = std::max(block.whole->end_byte, syntax_end);
+    }
+    const bool inline_leaf = stack.back()->kind == NodeKind::Paragraph ||
+        (type == MD_BLOCK_H && content.start_byte != content.end_byte) || type == MD_BLOCK_TH || type == MD_BLOCK_TD;
+    if (path.size() > 1 && inline_leaf && (lines == 1 || type == MD_BLOCK_P))
+      block.leaves.emplace_back(std::vector<std::size_t>(path.begin() + 1, path.end()), content);
   }
 
   void RecordRestart(MD_TEXTTYPE type, const char* text) {
@@ -186,6 +213,7 @@ int EnterBlock(MD_BLOCKTYPE type, void* detail, void* context) noexcept {
   auto& b = *static_cast<Builder*>(context);
   return b.Guard([&] {
     if (type == MD_BLOCK_DOC) return;
+    b.CloseImplicitParagraph();
     NodeKind kind;
     switch (type) {
     case MD_BLOCK_QUOTE: kind = NodeKind::BlockQuote; break;
@@ -260,19 +288,8 @@ int LeaveBlock(MD_BLOCKTYPE type, void*, void* context) noexcept {
   auto& b = *static_cast<Builder*>(context);
   return b.Guard([&] {
     if (type == MD_BLOCK_DOC) return;
-    if (type == MD_BLOCK_LI || type == MD_BLOCK_FOOTNOTE_DEF) {
-      auto& children = b.stack.back()->children;
-      std::vector<MarkdownNode> normalized;
-      for (auto& child : children) {
-        if (!IsBlock(child.kind)) {
-          if (normalized.empty() || normalized.back().kind != NodeKind::Paragraph)
-            normalized.push_back(MarkdownNode{.kind = NodeKind::Paragraph});
-          normalized.back().children.push_back(std::move(child));
-        } else normalized.push_back(std::move(child));
-      }
-      children = std::move(normalized);
-    }
-    b.stack.pop_back();
+    b.CloseImplicitParagraph();
+    b.Pop();
   });
 }
 
@@ -282,6 +299,7 @@ int EnterSpan(MD_SPANTYPE type, void* detail, void* context) noexcept {
     // Paragraphs starting with a span might produce their first raw text on a later
     // line. ATX headings are single-line and remain eligible through inline spans.
     if (b.stack.size() >= 2 && b.stack[1]->kind == NodeKind::Paragraph) b.first_content = false;
+    b.OpenImplicitParagraph();
     NodeKind kind;
     switch (type) {
     case MD_SPAN_EM: kind = NodeKind::Emphasis; break;
@@ -324,15 +342,21 @@ int EnterSpan(MD_SPANTYPE type, void* detail, void* context) noexcept {
 }
 
 int LeaveSpan(MD_SPANTYPE, void*, void* context) noexcept {
-  static_cast<Builder*>(context)->stack.pop_back();
+  static_cast<Builder*>(context)->Pop();
   return 0;
+}
+
+int BlockSource(MD_BLOCKTYPE type, MD_OFFSET begin, MD_OFFSET end, MD_OFFSET syntax_end, MD_SIZE lines,
+                void* context) noexcept {
+  auto& b = *static_cast<Builder*>(context);
+  return b.Guard([&] { b.RecordBlockSource(type, {begin, end}, syntax_end, lines); });
 }
 
 int TextCallback(MD_TEXTTYPE type, const MD_CHAR* data, MD_SIZE size, void* context) noexcept {
   auto& b = *static_cast<Builder*>(context);
   return b.Guard([&] {
     b.RecordRestart(type, data);
-    b.RecordSource(data, size);
+    b.OpenImplicitParagraph();
     std::string text;
     switch (type) {
     case MD_TEXT_ENTITY: text = DecodeEntity({data, size}); break;
@@ -401,8 +425,13 @@ void ValidateInput(std::string_view source, const ParseOptions& options) {
 struct ParsedSource {
   MarkdownNode root;
   std::vector<Builder::Restart> restarts;
-  std::vector<std::optional<MarkdownSourceRange>> ranges;
+  std::vector<BlockSources> ranges;
 };
+
+void RemoveBlankNodes(MarkdownNode& node) {
+  std::erase_if(node.children, [](const auto& child) { return child.kind == NodeKind::BlankLines; });
+  for (auto& child : node.children) RemoveBlankNodes(child);
+}
 
 ParsedSource ParseValidatedSource(std::string_view source, const ParseOptions& options) {
   Builder builder;
@@ -432,6 +461,7 @@ ParsedSource ParseValidatedSource(std::string_view source, const ParseOptions& o
   parser.enter_span = EnterSpan;
   parser.leave_span = LeaveSpan;
   parser.text = TextCallback;
+  if (options.source_ranges) parser.block_source = BlockSource;
   const int result = md_parse(source.empty() ? "" : source.data(), static_cast<MD_SIZE>(source.size()), &parser, &builder);
   if (builder.error) std::rethrow_exception(builder.error);
   if (result != 0) throw std::runtime_error("MD4C could not parse Markdown");
@@ -439,29 +469,32 @@ ParsedSource ParseValidatedSource(std::string_view source, const ParseOptions& o
     auto fragment_options = options;
     fragment_options.source_ranges = false;
     for (std::size_t i = 0; i < builder.ranges.size(); ++i) {
-      auto& range = builder.ranges[i];
+      auto& range = builder.ranges[i].whole;
       if (!range) continue;
       auto begin = range->start_byte;
       while (begin && source[begin - 1] != '\r' && source[begin - 1] != '\n') --begin;
       if (!begin && source.starts_with("\xEF\xBB\xBF")) begin = 3;
-      auto end = source.find_first_of("\r\n", range->end_byte - 1);
+      auto end = source.find_first_of("\r\n", range->end_byte);
       if (end == std::string_view::npos) end = source.size();
-      const auto matches = [&](std::size_t last) {
+      const auto& node = builder.root.children[i];
+      const auto matches = [&] {
         try {
-          const auto parsed = ParseValidatedSource(source.substr(begin, last - begin), fragment_options);
-          return parsed.root.children.size() == 1 && parsed.root.children.front() == builder.root.children[i];
+          auto parsed = ParseValidatedSource(source.substr(begin, end - begin), fragment_options);
+          if (parsed.root.children.size() != 1) return false;
+          auto& fragment = parsed.root.children.front();
+          if (fragment == node) return true;
+          if (!options.preserve_blank_lines) return false;
+          // The last observed leaf may precede blank lines still emitted
+          // inside a container. The editable slice leaves those bytes alone.
+          auto expected = node;
+          RemoveBlankNodes(expected);
+          RemoveBlankNodes(fragment);
+          return fragment == expected;
         } catch (const std::length_error&) { return false; } // Isolated syntax can have a different depth.
       };
-      bool verified = matches(end);
-      // Setext headings have a marker-only line after their inline content.
-      if (!verified && builder.root.children[i].kind == NodeKind::Heading && end < source.size()) {
-        auto next = end + 1;
-        if (source[end] == '\r' && next < source.size() && source[next] == '\n') ++next;
-        const auto line_end = source.find_first_of("\r\n", next);
-        end = line_end == std::string_view::npos ? source.size() : line_end;
-        verified = matches(end);
-      }
-      if (verified) range = MarkdownSourceRange{begin, end};
+      // The isolated check also rejects context-dependent references and
+      // containers with syntax-only lines outside the observed interval.
+      if (matches()) range = MarkdownSourceRange{begin, end};
       else range.reset(); // Never guess across context-dependent or synthetic content.
     }
   }
@@ -472,8 +505,8 @@ ParsedSource ParseValidatedSource(std::string_view source, const ParseOptions& o
 
 struct MarkdownDocument::Storage {
   MarkdownNode root;
-  std::vector<std::optional<MarkdownSourceRange>> ranges;
-  explicit Storage(MarkdownNode value, std::vector<std::optional<MarkdownSourceRange>> positions = {})
+  std::vector<BlockSources> ranges;
+  explicit Storage(MarkdownNode value, std::vector<BlockSources> positions = {})
       : root(std::move(value)), ranges(std::move(positions)) {}
 };
 
@@ -493,13 +526,25 @@ MarkdownDocument::MarkdownDocument() {
   static const auto empty = std::make_shared<const Storage>(MarkdownNode{.kind = NodeKind::Document});
   storage_ = empty;
 }
-MarkdownDocument::MarkdownDocument(MarkdownNode root, std::vector<std::optional<MarkdownSourceRange>> ranges)
-    : storage_(std::make_shared<const Storage>(std::move(root), std::move(ranges))) {}
 const MarkdownNode& MarkdownDocument::Root() const noexcept { return storage_->root; }
 std::string MarkdownDocument::PlainText() const { return markdown::PlainText(Root()); }
 std::optional<MarkdownSourceRange> MarkdownDocument::TopLevelSourceRange(std::size_t index) const {
   if (index >= Root().children.size()) throw std::out_of_range("Markdown block index");
-  return storage_->ranges.empty() ? std::nullopt : storage_->ranges.at(index);
+  return storage_->ranges.empty() ? std::nullopt : storage_->ranges.at(index).whole;
+}
+std::optional<MarkdownSourceRange> MarkdownDocument::SourceRange(std::span<const std::size_t> path) const {
+  if (path.empty()) return std::nullopt;
+  if (path.size() == 1) return TopLevelSourceRange(path.front());
+  const auto* node = &Root();
+  for (const auto index : path) node = &node->children.at(index);
+  if (storage_->ranges.empty()) return std::nullopt;
+  const auto& leaves = storage_->ranges[path.front()].leaves;
+  const auto relative = path.subspan(1);
+  const auto found = std::lower_bound(leaves.begin(), leaves.end(), relative, [](const auto& leaf, auto key) {
+    return std::lexicographical_compare(leaf.first.begin(), leaf.first.end(), key.begin(), key.end());
+  });
+  if (found == leaves.end() || !std::ranges::equal(found->first, relative)) return std::nullopt;
+  return found->second;
 }
 std::string PlainText(const MarkdownNode& node) {
   std::string out;
@@ -510,7 +555,7 @@ std::string PlainText(const MarkdownNode& node) {
 MarkdownDocument ParseMarkdown(std::string_view source, ParseOptions options) {
   ValidateInput(source, options);
   auto parsed = ParseValidatedSource(source, options);
-  return MarkdownDocument(std::move(parsed.root), std::move(parsed.ranges));
+  return MarkdownDocument(std::make_shared<const MarkdownDocument::Storage>(std::move(parsed.root), std::move(parsed.ranges)));
 }
 
 struct MarkdownParseSession::Impl {
@@ -531,6 +576,10 @@ const MarkdownDocument& MarkdownParseSession::Document() const noexcept { return
 MarkdownParseStats MarkdownParseSession::LastParseStats() const noexcept { return impl_->stats; }
 
 MarkdownDocument MarkdownParseSession::Update(std::string_view source) {
+  return Update(source, {});
+}
+
+MarkdownDocument MarkdownParseSession::Update(std::string_view source, const ValidateDocument& validate) {
   ValidateInput(source, impl_->options);
   if (source == impl_->source) {
     const auto count = impl_->document.Root().children.size();
@@ -569,16 +618,23 @@ MarkdownDocument MarkdownParseSession::Update(std::string_view source) {
     restarts.push_back(restart);
   }
   if (impl_->options.source_ranges) {
-    std::vector<std::optional<MarkdownSourceRange>> ranges;
+    std::vector<BlockSources> ranges;
     ranges.reserve(parsed.root.children.size());
-    for (std::size_t i = 0; i < retained; ++i) ranges.push_back(impl_->document.TopLevelSourceRange(i));
-    for (auto range : parsed.ranges) {
-      if (range) { range->start_byte += restart_byte; range->end_byte += restart_byte; }
-      ranges.push_back(range);
+    const auto& previous = impl_->document.storage_->ranges;
+    if (retained) ranges.insert(ranges.end(), previous.begin(), previous.begin() + retained);
+    const auto rebase = [restart_byte](MarkdownSourceRange& range) {
+      range.start_byte += restart_byte;
+      range.end_byte += restart_byte;
+    };
+    for (auto& block : parsed.ranges) {
+      if (block.whole) rebase(*block.whole);
+      for (auto& leaf : block.leaves) rebase(leaf.second);
+      ranges.push_back(std::move(block));
     }
     parsed.ranges = std::move(ranges);
   }
-  MarkdownDocument next(std::move(parsed.root), std::move(parsed.ranges));
+  MarkdownDocument next(std::make_shared<const MarkdownDocument::Storage>(std::move(parsed.root), std::move(parsed.ranges)));
+  if (validate) validate(next);
   const MarkdownParseStats stats{
     retained ? MarkdownParseMode::Incremental : MarkdownParseMode::Full,
     owned_source.size() - restart_byte, retained, next.Root().children.size(),
@@ -596,6 +652,10 @@ MarkdownDocument MarkdownParseSession::Append(std::string_view text) {
 }
 
 MarkdownDocument MarkdownParseSession::ApplyEdit(const MarkdownEdit& edit) {
+  return ApplyEdit(edit, {});
+}
+
+MarkdownDocument MarkdownParseSession::ApplyEdit(const MarkdownEdit& edit, const ValidateDocument& validate) {
   const auto& source = impl_->source;
   if (edit.start_byte > source.size() || edit.removed_bytes > source.size() - edit.start_byte)
     throw std::out_of_range("Markdown edit is outside the source");
@@ -610,7 +670,7 @@ MarkdownDocument MarkdownParseSession::ApplyEdit(const MarkdownEdit& edit) {
   if (edit.inserted_text.size() > limit - remaining) throw std::length_error("Markdown input limit exceeded");
   auto next = source;
   next.replace(edit.start_byte, edit.removed_bytes, edit.inserted_text);
-  return Update(next);
+  return Update(next, validate);
 }
 
 struct MarkdownStream::Impl {

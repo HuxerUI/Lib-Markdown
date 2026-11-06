@@ -22,5 +22,7 @@ struct InlineResult {
 
 InlineResult BuildInline(const MarkdownNode& node, const MarkdownStyle& theme,
                          const MarkdownLinkPolicy& policy = {}, const std::set<unsigned>* revealed_spoilers = nullptr);
+std::vector<TextStyleRange> BuildEditableStyles(const MarkdownRichText& rich, const TextStyle& base,
+                                                const MarkdownStyle& theme, const MarkdownLinkPolicy& policy);
 
 } // namespace huxerui::markdown::detail

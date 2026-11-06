@@ -20,7 +20,7 @@ CommonMark parser, configurable GFM extensions, and ordinary declarative views.
 - Stateful incremental parsing with UTF-8 edits, safe prefix reuse and parse statistics
 - Arbitrary-byte UTF-8 streaming and optional measured top-level block virtualization
 - Verified source ranges, block edit sessions and a virtualized native MarkdownEditor
-- Direct editing of attributed paragraph/heading text, preserving inline formatting and native IME geometry
+- Direct editing of attributed paragraphs, headings, list/quote text and explicit table cells
 - Click-to-reveal spoilers, separate URL/email/WWW autolinks and explicit syntax presets
 - Vendored MIT-licensed MD4C; no runtime download, WebView, JavaScript, or HTML rendering
 
@@ -254,13 +254,12 @@ With Visual Studio, launch `build-preview/Release/markdown_preview.exe`; keep it
 artifact after its standalone build and interaction tests pass.
 
 The separate [Markdown Writer](examples/editor/README.md) is the experimental
-Typora-inspired editing demo. Supported paragraphs/headings edit directly in their
-existing typography, with hidden Markdown markers and no duplicate preview.
+Typora-inspired editing demo. Supported paragraphs, headings, nested list and quote
+text, and table cells edit directly with their existing typography.
 The native attributed paragraph owns drawing, caret, selection and IME geometry.
-Inline formatting is retained while source is regenerated within the edited block.
-Unsupported inline content uses in-place source editing; full-source mode remains
-available for other structures. Cross-block editing and shared history remain
-future work. See [block editing](docs/block-editing.md) and [remaining decisions](docs/editor-follow-up.md).
+In-place source editing covers code blocks and complex content with a verified
+range. Use full-source mode for structural changes and context-dependent ranges.
+See [block editing](docs/block-editing.md) and [the follow-up plan](docs/editor-follow-up.md).
 
 ```sh
 cmake -S examples/editor -B build-editor -DHUXERUI_HOME=/path/to/HuxerUI

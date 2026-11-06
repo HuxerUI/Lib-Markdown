@@ -3,6 +3,8 @@
 #include <functional>
 #include <stdexcept>
 
+#include "editing_internal.h"
+
 namespace huxerui::markdown {
 namespace {
 std::vector<std::string> Scalars(std::string_view text) {
@@ -20,6 +22,8 @@ bool InlineSupported(const MarkdownNode& node) noexcept {
   switch (node.kind) {
   case NodeKind::Paragraph:
   case NodeKind::Heading:
+  case NodeKind::TableHeaderCell:
+  case NodeKind::TableCell:
   case NodeKind::Text:
   case NodeKind::Emphasis:
   case NodeKind::Strong:
@@ -60,7 +64,8 @@ std::string Entity(std::string_view scalar) {
 } // namespace
 
 bool MarkdownRichText::Supports(const MarkdownNode& node) noexcept {
-  return (node.kind == NodeKind::Paragraph || node.kind == NodeKind::Heading) && InlineSupported(node);
+  return (node.kind == NodeKind::Paragraph || node.kind == NodeKind::Heading || detail::IsTableCell(node.kind)) &&
+      InlineSupported(node);
 }
 MarkdownRichText::MarkdownRichText(const MarkdownNode& node, ParseOptions options)
     : kind_(node.kind), heading_level_(node.heading_level), options_(options) {
@@ -74,7 +79,8 @@ MarkdownRichText::MarkdownRichText(const MarkdownNode& node, ParseOptions option
   value_ = TextEditingValue::FromText(std::move(text));
 }
 void MarkdownRichText::Append(const MarkdownNode& node, std::vector<MarkdownTextMark> marks) {
-  if (node.kind != NodeKind::Text && node.kind != NodeKind::Paragraph && node.kind != NodeKind::Heading)
+  if (node.kind != NodeKind::Text && node.kind != NodeKind::Paragraph && node.kind != NodeKind::Heading &&
+      !detail::IsTableCell(node.kind))
     marks.push_back({node.kind, node.destination, node.title});
   for (auto& scalar : Scalars(node.text))
     characters_.push_back({std::move(scalar), marks});
@@ -215,6 +221,11 @@ TextEditingValue MarkdownRichText::Serialize(bool entities) const {
 TextEditingValue MarkdownRichText::SourceValue() const {
   for (const bool entities : {false, true}) {
     auto source = Serialize(entities);
+    if (detail::IsTableCell(kind_)) {
+      const auto cell = detail::ParseTableCell(source.text, options_);
+      if (cell && MarkdownRichText(*cell, options_).characters_ == characters_) return source;
+      continue;
+    }
     const auto parsed = ParseMarkdown(source.text, options_);
     if (value_.text.empty() && parsed.PlainText().empty())
       return source;
@@ -247,11 +258,15 @@ void MarkdownRichText::Update(const TextEditingValue& value) {
       for (auto old = history_.rbegin(); old != history_.rend(); ++old) {
         if (old->text != value.text)
           continue;
-        const auto document = ParseMarkdown(old->source, options_);
-        if (value.text.empty())
+        if (value.text.empty()) {
           next.characters_.clear();
-        else
+        } else if (detail::IsTableCell(kind_)) {
+          const auto cell = detail::ParseTableCell(old->source, options_);
+          next.characters_ = MarkdownRichText(cell.value(), options_).characters_;
+        } else {
+          const auto document = ParseMarkdown(old->source, options_);
           next.characters_ = MarkdownRichText(document.Root().children.at(0), options_).characters_;
+        }
         restored = true;
         break;
       }
