@@ -96,6 +96,8 @@ public:
     rejected_ = options.rejected;
   }
 
+  void SetItemLookup(std::function<std::size_t(std::size_t)> lookup) { item_for_paragraph_ = std::move(lookup); }
+
   const auto& Current() const { return edit_.Current(); }
   auto Composition() const { return edit_.Composition(); }
   bool Focused() const noexcept { return session_ != 0; }
@@ -120,7 +122,9 @@ public:
     if (!reveal_) return;
     reveal_ = false;
     const auto position = Current().document.Locate(Current().selection.active);
-    if (!Mounted(position.index)) scroll_.ScrollToItem(position.index);
+    if (!Mounted(position.index)) {
+      scroll_.ScrollToItem(item_for_paragraph_ ? item_for_paragraph_(position.index) : position.index);
+    }
   }
 
   TextInputConfiguration Configuration() const override { return {.multiline = true}; }
@@ -205,7 +209,9 @@ public:
       if (row->index >= document.Paragraphs().size() || Mounted(row->index) != row) continue;
       const auto hit = row->transform.Inverse(window);
       if (!hit) continue;
-      const auto outside = std::max({0.0F, -hit->y, hit->y - row->bounds.height});
+      const auto dx = std::max({0.0F, -hit->x, hit->x - row->bounds.width});
+      const auto dy = std::max({0.0F, -hit->y, hit->y - row->bounds.height});
+      const auto outside = std::hypot(dx, dy);
       if (outside < distance) {
         distance = outside;
         local = *hit;
@@ -451,6 +457,7 @@ private:
   ScrollController scroll_;
   std::function<void(const Document&, std::optional<TextRange>)> changed_;
   std::function<void(std::string_view)> rejected_;
+  std::function<std::size_t(std::size_t)> item_for_paragraph_;
   std::map<TextBlockId, RowGeometry*> rows_;
   Transform2D transform_;
   Color selection_color_{};
@@ -525,6 +532,7 @@ struct ParagraphSurface {
   TextOffset start;
   TextStyle style;
   TextShapingOptions shaping;
+  TextAlign align;
   Color selection_color;
   Color caret_color;
 };
@@ -549,7 +557,7 @@ public:
     const auto bounds = node.ContentBounds();
     row_ = {
       value_.paragraph.id, value_.index, value_.paragraph.text,
-      measurer.LayoutText(value_.displayed, value_.style, bounds.width, {.shaping = value_.shaping}),
+      measurer.LayoutText(value_.displayed, value_.style, bounds.width, {.shaping = value_.shaping, .align = value_.align}),
       Transform(node, {bounds.x, bounds.y}), bounds,
     };
     value_.editor->Register(row_);
@@ -630,16 +638,24 @@ View MakeEditor(std::function<EditSession()> initialize, detail::EditorOptions o
     const auto caret = theme.colors.primary;
     const auto line_height = UseTextMeasurer().Metrics(style.font).LineHeight();
     const auto spacing = options.paragraph_spacing;
-    return VirtualList(document.Paragraphs().size(), [=](std::size_t index) -> View {
+    const auto layout = options.layout ? options.layout(document) : detail::EditorLayout{};
+    editor->SetItemLookup(layout.item_for_paragraph);
+    const auto count = options.layout ? layout.item_ids.size() : document.Paragraphs().size();
+    const detail::RenderParagraph render = [=](std::size_t index, AttributedText displayed, TextStyle base,
+                                                TextAlign align) -> View {
+      const auto& paragraph = document.Paragraphs()[index];
+      return Text(displayed).Style(base).Shaping(shaping).Align(align)
+          .With(Frame{.min_height = line_height},
+                ParagraphSurface{editor, paragraph, displayed, index, document.Start(index), base, shaping, align,
+                                 selection, caret}).Key(paragraph.id);
+    };
+    return VirtualList(count, [=](std::size_t index) -> View {
       return Scope([=] {
-        const auto& paragraph = document.Paragraphs()[index];
-        auto displayed = options.display ? options.display(document, index) : EditableText(paragraph.text, caret);
-        const float gap = index + 1 < document.Paragraphs().size() ? spacing : 0.0F;
-        return Text(displayed).Style(style).Shaping(shaping)
-            .With(Padding(EdgeInsets{0.0F, 0.0F, gap, 0.0F}), Frame{.min_height = line_height},
-                  ParagraphSurface{editor, paragraph, displayed, index, document.Start(index), style, shaping,
-                                   selection, caret});
-      }).Key(document.Paragraphs()[index].id);
+        View row = layout.render_item ? layout.render_item(index, render) :
+            render(index, EditableText(document.Paragraphs()[index].text, caret), style, TextAlign::Leading);
+        const float gap = index + 1 < count ? spacing : 0.0F;
+        return std::move(row).With(Padding(EdgeInsets{0.0F, 0.0F, gap, 0.0F}));
+      }).Key(layout.render_item ? layout.item_ids[index] : document.Paragraphs()[index].id);
     }).EstimatedItemExtent(line_height + spacing).Controller(scroll)
       .With(Focusable{true}, PointerCursor(PointerCursorKind::Text), DocumentSurface{editor, caret}, ScrollBar(),
             Grow{}).Key("rich-text-editor");

@@ -2,7 +2,7 @@
 
 #include <huxerui/markdown.h>
 
-#include "model.h"
+#include "editor.h"
 
 namespace huxerui::markdown::detail {
 
@@ -11,7 +11,7 @@ namespace huxerui::markdown::detail {
     std::string_view source, ParseOptions options);
 [[nodiscard]] std::string_view EditableMarkdownSource(const rich_text::detail::Document& document);
 [[nodiscard]] const MarkdownDocument& EditableMarkdownSyntax(const rich_text::detail::Document& document);
-[[nodiscard]] AttributedText EditableMarkdownParagraph(const rich_text::detail::Document& document, std::size_t index,
-                                                       const MarkdownStyle& style, const MarkdownLinkPolicy& policy = {});
+[[nodiscard]] rich_text::detail::EditorLayout EditableMarkdownLayout(const rich_text::detail::Document& document,
+                                                                      MarkdownStyle style);
 
 } // namespace huxerui::markdown::detail

@@ -84,7 +84,7 @@ int main(int argc, char** argv) { return Run([&] {
   const auto experiment = ui.Find(UiSelector::Key("document-mode-toggle"));
   const auto surface = ui.Find(UiSelector::Key("rich-text-editor"));
   source.Tap();
-  source.ReplaceText("# Keep\r\n\r\n- item\r\n");
+  source.ReplaceText("```\r\nprotected\r\n```\r\n");
   experiment.Tap();
   CHECK(!surface.Exists() && source.Exists());
 
@@ -134,5 +134,30 @@ int main(int argc, char** argv) { return Run([&] {
   CHECK(surface.Exists() && ui.Find(UiSelector::Text("Ti中文dy")).Exists());
   ui.Find(UiSelector::Key("mode-toggle")).Tap();
   CHECK(!surface.Exists() && source.One().value == "# **Ti中文dy**\r\n\r\n*After*\r\n");
+
+  source.Tap();
+  source.ReplaceText("# Mix\r\n\r\n- **parent**\r\n  - [x] nested\r\n\r\n> quote\r\n\r\n"
+      "| A | B |\r\n| --- | ---: |\r\n| c | right |\r\n");
+  experiment.Tap();
+  CHECK(surface.Exists());
+  ui.Find(UiSelector::Text("nested")).Tap({.device_kind = PointerDeviceKind::Mouse});
+  CHECK(ui.ActiveTextInput().has_value());
+  const auto mixed_client = ui.ActiveTextInput()->session_id;
+  CHECK(ui.ActiveTextInput()->selection.active >= 11 && ui.ActiveTextInput()->selection.active <= 17);
+  CHECK(ui.SendTextInput({mixed_client, {{.kind = TextInputCommandKind::CommitText, .target = TextRange{11, 17}, .text = "中文"}}})
+      .result_code == TextInputResultCode::Ok);
+  ui.Pump();
+  CHECK(ui.Find(UiSelector::Text("中文")).Exists());
+  const auto cell = ui.Find(UiSelector::Text("right")).One().bounds;
+  ui.TapAt({cell.x + cell.width - 2, cell.y + cell.height / 2}, {.device_kind = PointerDeviceKind::Mouse});
+  CHECK(ui.ActiveTextInput()->session_id == mixed_client);
+  CHECK(ui.ActiveTextInput()->selection.IsCollapsed() && ui.ActiveTextInput()->selection.active == 31);
+  CHECK(ui.SendTextInput({mixed_client, {{.kind = TextInputCommandKind::CommitText, .text = "末"}}})
+      .result_code == TextInputResultCode::Ok);
+  ui.Pump();
+  CHECK(ui.Find(UiSelector::Text("right末")).Exists());
+  ui.Find(UiSelector::Key("mode-toggle")).Tap();
+  CHECK(source.One().value->find("  - [x] 中文\r\n") != std::string::npos);
+  CHECK(source.One().value->find("| c | right末 |\r\n") != std::string::npos);
 #endif
 }); }

@@ -173,15 +173,15 @@ View App() {
     View body;
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
     using huxerui::markdown::detail::EditableMarkdownDocument;
-    using huxerui::markdown::detail::EditableMarkdownParagraph;
+    using huxerui::markdown::detail::EditableMarkdownLayout;
     using huxerui::markdown::detail::EditableMarkdownSource;
     using huxerui::markdown::detail::EditableMarkdownSyntax;
     if (const auto& editor = document_editor.Get()) {
       body = rich_text::detail::RichTextEditor(*editor, {
           .base_style = style.body,
           .paragraph_spacing = style.block_spacing,
-          .display = [style](const rich_text::detail::Document& doc, std::size_t index) {
-            return EditableMarkdownParagraph(doc, index, style);
+          .layout = [style](const rich_text::detail::Document& doc) {
+            return EditableMarkdownLayout(doc, style);
           },
           .changed = [=](const rich_text::detail::Document& doc, std::optional<TextRange> composition) mutable {
             document_composing = composition.has_value();
@@ -250,7 +250,7 @@ View App() {
             editing = false;
             status = "跨段编辑 · 选中标题和正文后输入，Ctrl+Z 撤销";
           } catch (const std::invalid_argument&) {
-            status = "跨段编辑目前支持标题和普通段落，请在源码模式试一篇纯正文草稿。";
+            status = "当前草稿没有可定位的文字块。可用块内编辑或源码模式。";
           } catch (const std::length_error& error) {
             status = std::string("无法跨段编辑：") + error.what();
           }

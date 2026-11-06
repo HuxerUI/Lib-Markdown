@@ -85,6 +85,14 @@ std::span<const MarkdownTextMark> MarksAt(std::span<const MarkdownRichTextRun> r
   return {};
 }
 
+bool MissingMark(const MarkdownRichText& text, TextRange range, NodeKind mark) {
+  for (const auto& run : text.Runs()) {
+    if (run.range.start < range.end && range.start < run.range.end &&
+        std::ranges::find(run.marks, mark, &MarkdownTextMark::kind) == run.marks.end()) return true;
+  }
+  return false;
+}
+
 std::string_view LineEnding(std::string_view source, std::size_t start) {
   auto at = source.find_first_of("\r\n", start);
   if (at == std::string_view::npos) at = source.find_first_of("\r\n");
@@ -115,6 +123,15 @@ std::optional<MarkdownNode> detail::ParseTableCell(std::string_view source, Pars
   return cells.front();
 }
 
+MarkdownRichText detail::RichProjection(const MarkdownNode& node, bool nested, ParseOptions options) {
+  if (!nested || node.kind != NodeKind::Heading) return MarkdownRichText(node, options);
+  // Nested heading markers are outside the verified content interval.
+  auto content = node;
+  content.kind = NodeKind::Paragraph;
+  content.heading_level = 0;
+  return MarkdownRichText(content, options);
+}
+
 detail::MarkdownDocumentEditSession::MarkdownDocumentEditSession(std::string_view source, ParseOptions options)
     : options_(options), parser_(EditingOptions(options)) {
   options_.source_ranges = false;
@@ -134,9 +151,13 @@ detail::MarkdownDocumentEditSession::MarkdownDocumentEditSession(const MarkdownD
     : options_(other.options_), parser_(other.parser_.Fork()), blocks_(other.blocks_) {}
 
 const MarkdownNode& detail::MarkdownDocumentEditSession::Block(std::size_t index) const {
-  const auto syntax_index = blocks_.at(index).syntax_index;
+  const auto syntax_index = SyntaxIndex(index);
   static const MarkdownNode empty{.kind = NodeKind::Paragraph};
   return syntax_index ? Document().Root().children[*syntax_index] : empty;
+}
+
+std::optional<std::size_t> detail::MarkdownDocumentEditSession::SyntaxIndex(std::size_t index) const {
+  return blocks_.at(index).syntax_index;
 }
 
 std::optional<MarkdownSourceRange> detail::MarkdownDocumentEditSession::SourceRange(std::size_t index) const {
@@ -216,6 +237,52 @@ detail::MarkdownBlockPosition detail::MarkdownDocumentEditSession::Replace(
   return {first.block + formatted.size() - 1, caret_offset};
 }
 
+const MarkdownNode& detail::MarkdownDocumentEditSession::NestedBlock(std::size_t block,
+                                                                     std::span<const std::size_t> path) const {
+  if (path.size() < 2 || SyntaxIndex(block) != path.front() || !Document().SourceRange(path))
+    throw std::invalid_argument("Nested Markdown edit requires a verified content range");
+  const auto* node = &Block(block);
+  for (const auto index : path.subspan(1)) node = &node->children.at(index);
+  return *node;
+}
+
+void detail::MarkdownDocumentEditSession::ReplaceNested(std::size_t block, std::span<const std::size_t> path,
+                                                        TextRange range, std::string_view replacement) {
+  if (replacement.find_first_of("\r\n") != std::string_view::npos)
+    throw std::invalid_argument("Use block or source editing for nested line breaks");
+  const auto& node = NestedBlock(block, path);
+  const auto rich = RichProjection(node, true, options_);
+  const AttributedText original(rich.Value().text);
+  (void)original.TextInRange(range);
+  MarkdownNode edited;
+  edited.kind = node.kind == NodeKind::Heading ? NodeKind::Paragraph : node.kind;
+  const auto runs = rich.Runs();
+  const auto offset = range.start > 0 && (range.IsCollapsed() || range.start == original.Length())
+      ? range.start - 1 : range.start;
+  AppendRichSlice(edited, original, runs, {0, range.start});
+  AppendMarkedText(edited, std::string(replacement), MarksAt(runs, offset));
+  AppendRichSlice(edited, original, runs, {range.end, original.Length()});
+  ApplyNested(block, path, MarkdownRichText(edited, options_).SourceValue().text);
+}
+
+bool detail::MarkdownDocumentEditSession::ToggleNestedMark(std::size_t block, std::span<const std::size_t> path,
+                                                           TextRange range, NodeKind mark) {
+  auto rich = RichProjection(NestedBlock(block, path), true, options_);
+  if (!rich.SetMark(range, mark, MissingMark(rich, range, mark))) return false;
+  ApplyNested(block, path, rich.SourceValue().text);
+  return true;
+}
+
+void detail::MarkdownDocumentEditSession::ApplyNested(std::size_t block, std::span<const std::size_t> path,
+                                                      std::string replacement) {
+  const auto range = *Document().SourceRange(path);
+  auto expected = Block(block);
+  ReplaceNestedContent(expected, path.subspan(1), replacement, options_);
+  const auto removed = range.end_byte - range.start_byte;
+  const std::array formatted{FormattedBlock{{}, std::move(expected), false}};
+  ApplySplice(block, block, {range.start_byte, removed, std::move(replacement)}, formatted);
+}
+
 bool detail::MarkdownDocumentEditSession::ToggleMark(MarkdownBlockPosition first, MarkdownBlockPosition last,
                                                     NodeKind mark) {
   if (first.block > last.block || last.block >= blocks_.size() ||
@@ -240,15 +307,7 @@ bool detail::MarkdownDocumentEditSession::ToggleMark(MarkdownBlockPosition first
     const TextRange selection{index == first.block ? first.offset : 0,
                               index == last.block ? last.offset : displayed.Length()};
     (void)displayed.TextInRange(selection);
-    if (!selection.IsCollapsed() && !enable) {
-      for (const auto& run : text.Runs()) {
-        if (run.range.start < selection.end && selection.start < run.range.end &&
-            std::ranges::find(run.marks, mark, &MarkdownTextMark::kind) == run.marks.end()) {
-          enable = true;
-          break;
-        }
-      }
-    }
+    if (!selection.IsCollapsed() && !enable) enable = MissingMark(text, selection, mark);
     targets.push_back({*range, std::move(text), selection});
   }
   const auto start = targets.front().source.start_byte;
@@ -312,9 +371,12 @@ void detail::MarkdownDocumentEditSession::ApplySplice(std::size_t first, std::si
       if (location.syntax_index) {
         add_node(original.Root().children[*location.syntax_index]);
       } else {
-        auto at = location.source->start_byte;
-        if (after) at = at - edit.removed_bytes + edit.inserted_text.size();
-        locations.push_back({{}, MarkdownSourceRange{at, at}});
+        auto range = *location.source;
+        if (range.start_byte >= edit.start_byte + edit.removed_bytes && (range.start_byte > edit.start_byte || after)) {
+          range.start_byte = range.start_byte - edit.removed_bytes + edit.inserted_text.size();
+          range.end_byte = range.end_byte - edit.removed_bytes + edit.inserted_text.size();
+        }
+        locations.push_back({{}, range});
       }
     };
     for (std::size_t i = 0; i < first; ++i) retain(blocks_[i], false);
@@ -325,7 +387,8 @@ void detail::MarkdownDocumentEditSession::ApplySplice(std::size_t first, std::si
       }
       add_node(*part.node);
       const auto verified = locations.back().source;
-      if (!verified || verified->start_byte < part.range.start_byte || verified->end_byte > part.range.end_byte)
+      if (part.verify_range && (!verified || verified->start_byte < part.range.start_byte ||
+                                verified->end_byte > part.range.end_byte))
         throw std::invalid_argument("Markdown replacement has no verified source range");
     }
     for (std::size_t i = last + 1; i < blocks_.size(); ++i) retain(blocks_[i], true);

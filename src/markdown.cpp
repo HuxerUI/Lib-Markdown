@@ -540,15 +540,6 @@ bool FindEditPath(const MarkdownDocument& document, const MarkdownNode& node, No
   return false;
 }
 
-MarkdownRichText RichProjection(const MarkdownNode& node, bool nested, ParseOptions options) {
-  if (!nested || node.kind != NodeKind::Heading) return MarkdownRichText(node, options);
-  // The original heading marker stays outside a nested content interval.
-  auto content = node;
-  content.kind = NodeKind::Paragraph;
-  content.heading_level = 0;
-  return MarkdownRichText(content, options);
-}
-
 struct BlockEditorState {
   ParseOptions parse_options;
   MarkdownBlockEditSession session;
@@ -617,7 +608,7 @@ struct BlockEditorState {
     }
     std::optional<MarkdownRichText> projection;
     if (rich_text && MarkdownRichText::Supports(*node))
-      projection = RichProjection(*node, target.size() > 1, parse_options);
+      projection = detail::RichProjection(*node, target.size() > 1, parse_options);
     session.BeginEdit(target);
     rich = std::move(projection);
     ++focus_epoch;
@@ -665,7 +656,7 @@ View EditableField(const EditorRenderContext& context, std::shared_ptr<const Vir
     auto local = active ? state->session.EditingValue() : TextEditingValue::FromText(source);
     std::optional<MarkdownRichText> initial_projection;
     if (!active && state->rich_text && MarkdownRichText::Supports(node))
-      initial_projection = RichProjection(node, path.size() > 1, state->parse_options);
+      initial_projection = detail::RichProjection(node, path.size() > 1, state->parse_options);
     const auto& projection = active ? state->rich : initial_projection;
     if (projection) local = projection->Value();
     const bool table_cell = detail::IsTableCell(node.kind);
@@ -785,6 +776,26 @@ std::vector<TextStyleRange> BuildEditableStyles(const MarkdownRichText& rich, co
     result.push_back({run.range, std::move(style)});
   }
   return result;
+}
+
+std::vector<std::vector<std::size_t>> DocumentEditablePaths(const MarkdownDocument& document, std::string_view source,
+                                                          std::size_t block) {
+  const auto& node = document.Root().children.at(block);
+  NodePath root{block};
+  EditablePaths paths;
+  (void)CollectEditablePaths(document, source, true, node, root, paths);
+  std::vector<NodePath> ordered;
+  for (auto& [leaf, path] : paths) {
+    if (MarkdownRichText::Supports(*leaf)) ordered.push_back(std::move(path));
+  }
+  std::ranges::sort(ordered);
+  return ordered;
+}
+
+View RenderEditableBlock(const MarkdownNode& node, const MarkdownStyle& style,
+                         std::function<std::optional<View>(const MarkdownNode&, TextStyle, TextAlign)> editor) {
+  const MarkdownOptions options{.selectable = false};
+  return Renderer(options, style, {}, nullptr, false, std::move(editor)).RenderBlock(node);
 }
 } // namespace detail
 

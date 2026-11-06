@@ -176,12 +176,6 @@ int main() { return Run([] {
   CHECK(committed.Paragraphs().back().id == before_composition.document.Paragraphs().back().id);
   CHECK(committed.Paragraphs().back().text == before_composition.document.Paragraphs().back().text);
   const auto style = MarkdownStyle::FromTheme(MaterialDarkThemeSpec());
-  const auto displayed = markdown::detail::EditableMarkdownParagraph(committed, 0, style);
-  CHECK(displayed.PlainText() == "Ti中文dy");
-  CHECK(!displayed.StyleRanges().empty() && displayed.StyleRanges().front().style.font.has_value());
-  const auto after_display = markdown::detail::EditableMarkdownParagraph(committed, 1, style);
-  CHECK(after_display.StyleRanges().size() == 1 && after_display.StyleRanges().front().style.font &&
-        after_display.StyleRanges().front().style.font->Slant() == FontSlant::Italic);
   CHECK(backed.Undo());
   CHECK(EditableMarkdownSource(backed.Current().document) == markdown_source);
   CHECK(backed.Current().selection == before_composition.selection);
@@ -238,4 +232,44 @@ int main() { return Run([] {
   Throws<std::invalid_argument>([&] { formatted.ToggleFormat(InlineFormat::Italic, {0, 5}); });
   CHECK(formatted.Current().document == before_format_composition);
   CHECK(formatted.CancelComposition());
+
+  const std::string_view mixed_source = "# Mix\r\n\r\n- **parent**\r\n  - [x] nested\r\n\r\n> quote\r\n\r\n"
+      "| A | B |\r\n| --- | ---: |\r\n| c | right |\r\n\r\n```\r\nprotected\r\n```\r\n";
+  rich_text::detail::EditSession mixed_session(EditableMarkdownDocument(mixed_source, blank_lines));
+  const auto mixed_document = mixed_session.Current().document;
+  CHECK(mixed_document.TextInRange({0, mixed_document.Length()}) == "Mix\nparent\nnested\nquote\nA\nB\nc\nright");
+  const auto layout = markdown::detail::EditableMarkdownLayout(mixed_document, style);
+  CHECK(layout.item_ids.size() == 5);
+  CHECK(layout.item_for_paragraph(1) == layout.item_for_paragraph(2));
+  CHECK(layout.item_for_paragraph(4) == layout.item_for_paragraph(7));
+  const auto nested_start = mixed_document.Start(2);
+  mixed_session.Replace({nested_start, nested_start + 6}, "中文");
+  CHECK(EditableMarkdownSource(mixed_session.Current().document).find("  - [x] 中文\r\n") != std::string_view::npos);
+  mixed_session.ToggleFormat(InlineFormat::Bold, {nested_start, nested_start + 2});
+  CHECK(EditableMarkdownSource(mixed_session.Current().document).find("  - [x] **中文**\r\n") != std::string_view::npos);
+  const auto table_start = mixed_session.Current().document.Start(7);
+  mixed_session.Replace({table_start + 5, table_start + 5}, "中|");
+  CHECK(EditableMarkdownSource(mixed_session.Current().document).find("| c | right中\\| |\r\n") != std::string_view::npos);
+  const auto mixed_accepted = mixed_session.Current().document;
+  Throws<std::invalid_argument>([&] { mixed_session.Replace({nested_start, mixed_accepted.Start(3) + 1}, "跨"); });
+  CHECK(mixed_session.Current().document == mixed_accepted);
+  mixed_session.Replace({table_start, table_start + 7}, {});
+  CHECK(mixed_session.Current().document.Paragraphs()[7].text.PlainText().empty());
+  CHECK(mixed_session.Undo());
+  CHECK(mixed_session.Current().document == mixed_accepted);
+  const auto quote = mixed_session.Current().document.Start(3);
+  mixed_session.Replace({quote, quote + 5}, "引文");
+  CHECK(EditableMarkdownSource(mixed_session.Current().document).find("> 引文\r\n") != std::string_view::npos);
+
+  const auto footnote_source = "# Top\n\nSee [^f].\n\n[^f]: **Note**\n";
+  rich_text::detail::EditSession footnote(EditableMarkdownDocument(footnote_source, {.footnotes = true}));
+  CHECK(footnote.Current().document.Paragraphs().size() == 2);
+  const auto note = footnote.Current().document.Start(1);
+  footnote.Replace({note, note + 4}, "脚注");
+  CHECK(EditableMarkdownSource(footnote.Current().document) == "# Top\n\nSee [^f].\n\n[^f]: **脚注**\n");
+
+  const auto admonition_source = "> [!NOTE]\r\n> **Callout**\r\n";
+  rich_text::detail::EditSession admonition(EditableMarkdownDocument(admonition_source, {.admonitions = true}));
+  admonition.Replace({0, 7}, "提示");
+  CHECK(EditableMarkdownSource(admonition.Current().document) == "> [!NOTE]\r\n> **提示**\r\n");
 }); }

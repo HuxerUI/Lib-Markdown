@@ -20,10 +20,18 @@ struct InlineFormatActions {
   std::function<void(InlineFormat, TextSelection)> toggle;
 };
 
+using RenderParagraph = std::function<View(std::size_t, AttributedText, TextStyle, TextAlign)>;
+
+struct EditorLayout {
+  std::vector<TextBlockId> item_ids;
+  std::function<std::size_t(std::size_t)> item_for_paragraph;
+  std::function<View(std::size_t, const RenderParagraph&)> render_item;
+};
+
 struct EditorOptions {
   std::optional<TextStyle> base_style;
   float paragraph_spacing = 0.0F;
-  std::function<AttributedText(const Document&, std::size_t)> display;
+  std::function<EditorLayout(const Document&)> layout;
   std::function<void(const Document&, std::optional<TextRange>)> changed;
   std::function<void(std::string_view)> rejected;
   std::shared_ptr<InlineFormatActions> format_actions;
