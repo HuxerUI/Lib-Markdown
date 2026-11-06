@@ -31,12 +31,21 @@ public:
   [[nodiscard]] std::optional<MarkdownSourceRange> SourceRange(std::size_t index) const;
   [[nodiscard]] MarkdownBlockPosition Replace(MarkdownBlockPosition first, MarkdownBlockPosition last,
                                               std::string_view replacement);
+  bool ToggleMark(MarkdownBlockPosition first, MarkdownBlockPosition last, NodeKind mark);
 
 private:
   struct BlockLocation {
     std::optional<std::size_t> syntax_index;
     std::optional<MarkdownSourceRange> source;
   };
+  struct FormattedBlock {
+    MarkdownSourceRange range;
+    std::optional<MarkdownNode> node;
+  };
+  [[nodiscard]] FormattedBlock AppendFormatted(std::string& source, std::size_t base,
+                                              const MarkdownRichText& text, NodeKind kind) const;
+  void ApplySplice(std::size_t first, std::size_t last, const MarkdownEdit& edit,
+                   std::span<const FormattedBlock> formatted);
   ParseOptions options_;
   MarkdownParseSession parser_;
   std::vector<BlockLocation> blocks_;

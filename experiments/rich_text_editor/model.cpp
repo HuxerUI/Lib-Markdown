@@ -453,6 +453,19 @@ void EditSession::SetBold(bool bold) {
   }
 }
 
+void EditSession::ToggleFormat(InlineFormat format, TextSelection selection) {
+  if (composition_) throw std::invalid_argument("Finish composition before changing formatting");
+  const auto& original = current_.document;
+  ValidateSelection(original, selection);
+  if (selection.IsCollapsed()) return;
+  const auto& backing = original.Backing();
+  if (!backing) throw std::invalid_argument("This editor does not provide that format command");
+  auto formatted = backing->ToggleFormat(original, selection.Range(), format);
+  if (formatted == original) return;
+  RecordUndo({original, selection});
+  current_ = {std::move(formatted), selection};
+}
+
 void EditSession::BeginComposition(TextRange target) {
   if (composition_) throw std::logic_error("Rich text composition is already active");
   if (!target.IsValid()) throw std::invalid_argument("Rich text composition range must be ordered");

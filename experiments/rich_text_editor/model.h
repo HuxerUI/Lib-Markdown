@@ -24,6 +24,7 @@ struct ParagraphPosition {
 };
 
 class DocumentBacking;
+enum class InlineFormat { Bold, Italic, Code };
 
 // UTF-16 document offsets count a single LF between each pair of paragraphs.
 // Unaffected paragraphs share their attributed text with previous snapshots.
@@ -50,6 +51,7 @@ public:
   virtual ~DocumentBacking() = default;
   [[nodiscard]] virtual Document Replace(const Document& document, TextRange target,
                                          std::string_view replacement, TextBlockId& next_id) const = 0;
+  [[nodiscard]] virtual Document ToggleFormat(const Document& document, TextRange target, InlineFormat format) const = 0;
 };
 
 struct Snapshot {
@@ -72,6 +74,7 @@ public:
   [[nodiscard]] bool CanPerform(TextEditingAction action, PlatformClipboard* clipboard) const;
   bool Perform(TextEditingAction action, PlatformClipboard* clipboard);
   void SetBold(bool bold);
+  void ToggleFormat(InlineFormat format, TextSelection selection);
   void BeginComposition(TextRange target);
   void UpdateComposition(TextRange target, std::string_view text, std::optional<TextSelection> selection_after = {});
   void FinishComposition();

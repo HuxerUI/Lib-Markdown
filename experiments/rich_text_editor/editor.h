@@ -15,12 +15,18 @@ namespace huxerui::rich_text {
 
 namespace detail {
 
+struct InlineFormatActions {
+  std::function<std::optional<TextSelection>()> selection;
+  std::function<void(InlineFormat, TextSelection)> toggle;
+};
+
 struct EditorOptions {
   std::optional<TextStyle> base_style;
   float paragraph_spacing = 0.0F;
   std::function<AttributedText(const Document&, std::size_t)> display;
   std::function<void(const Document&, std::optional<TextRange>)> changed;
   std::function<void(std::string_view)> rejected;
+  std::shared_ptr<InlineFormatActions> format_actions;
 };
 
 [[nodiscard]] View RichTextEditor(Document document, EditorOptions options);

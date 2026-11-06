@@ -100,6 +100,10 @@ public:
   auto Composition() const { return edit_.Composition(); }
   bool Focused() const noexcept { return session_ != 0; }
 
+  void ToggleFormat(detail::InlineFormat format, TextSelection selection) {
+    Change([&] { edit_.ToggleFormat(format, selection); });
+  }
+
   void Register(RowGeometry& row) { rows_[row.id] = &row; }
 
   void Unregister(const RowGeometry& row) {
@@ -235,7 +239,12 @@ public:
         return handled;
       }
       if (event.key == Key::B && !Composition()) {
-        Change([&] { edit_.SetBold(!SelectionStartsBold()); });
+        if (Current().document.Backing()) ToggleFormat(detail::InlineFormat::Bold, Current().selection);
+        else Change([&] { edit_.SetBold(!SelectionStartsBold()); });
+        return handled;
+      }
+      if (event.key == Key::I && !Composition() && Current().document.Backing()) {
+        ToggleFormat(detail::InlineFormat::Italic, Current().selection);
         return handled;
       }
       return unhandled;
@@ -600,6 +609,16 @@ View MakeEditor(std::function<EditSession()> initialize, detail::EditorOptions o
     if (!*owner) *owner = std::make_shared<Editor>(initialize(), revision, scroll);
     const auto editor = *owner;
     editor->SetObservers(options);
+    if (options.format_actions) {
+      const std::weak_ptr<Editor> weak = editor;
+      options.format_actions->selection = [weak]() -> std::optional<TextSelection> {
+        if (const auto editor = weak.lock()) return editor->Current().selection;
+        return std::nullopt;
+      };
+      options.format_actions->toggle = [weak](detail::InlineFormat format, TextSelection selection) {
+        if (const auto editor = weak.lock()) editor->ToggleFormat(format, selection);
+      };
+    }
     Lifecycle([editor] { editor->RevealIfNeeded(); }, revision.Get());
     const auto document = editor->Current().document;
     const auto& theme = UseTheme();

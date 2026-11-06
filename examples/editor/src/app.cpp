@@ -95,6 +95,7 @@ View App() {
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
   auto document_editor = UseState(std::optional<rich_text::detail::Document>{});
   auto document_composing = UseState(false);
+  const auto format_actions = UseState(std::make_shared<rich_text::detail::InlineFormatActions>()).Get();
 #endif
   Lifecycle([=] {
     (void)Publish(session.Get(), initial_source, document, status);
@@ -106,29 +107,56 @@ View App() {
     auto style = MarkdownStyle::FromTheme(theme);
     style.body.font = style.body.font.WithSize(18);
     style.blank_line_height = 24;
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+    const bool document_mode = document_editor.Get().has_value();
+#else
+    constexpr bool document_mode = false;
+#endif
     std::vector<View> toolbar;
+    const auto command_selection = [=]() -> std::optional<TextSelection> {
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+      if (document_editor.Get()) return format_actions->selection ? format_actions->selection() : std::nullopt;
+#endif
+      return draft.Get().selection;
+    };
     const auto add_command = [&](const char* title, const char* key, MarkdownEditCommand command) {
       toolbar.push_back(Button(title).On<ViewEvents::Pointer>([=](const PointerEvent& event) {
         // Touch focus dismissal collapses the editor selection before Clicked.
         // Save only its endpoints, and use them only if the source has not changed.
-        if (event.type == PointerEventType::Down)
-          session.Get()->command_selection = std::pair{session.Get()->edit_revision, draft.Get().selection};
-        else if (event.type == PointerEventType::Cancel) session.Get()->command_selection.reset();
+        if (event.type == PointerEventType::Down) {
+          const auto selection = command_selection();
+          session.Get()->command_selection = selection
+              ? std::optional{std::pair{session.Get()->edit_revision, *selection}} : std::nullopt;
+        } else if (event.type == PointerEventType::Cancel) session.Get()->command_selection.reset();
       }).OnClick([=]() mutable {
         try {
-          auto input = draft.Get();
           const auto saved = std::exchange(session.Get()->command_selection, std::nullopt);
-          if (saved && saved->first == session.Get()->edit_revision) input.selection = saved->second;
+          const auto selection = saved && saved->first == session.Get()->edit_revision
+              ? std::optional{saved->second} : command_selection();
+          if (!selection) return;
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+          if (document_editor.Get()) {
+            using rich_text::detail::InlineFormat;
+            const auto format = command == MarkdownEditCommand::Bold ? InlineFormat::Bold :
+                command == MarkdownEditCommand::Italic ? InlineFormat::Italic : InlineFormat::Code;
+            if (format_actions->toggle) format_actions->toggle(format, *selection);
+            return;
+          }
+#endif
+          auto input = draft.Get();
+          input.selection = *selection;
           draft = ApplyMarkdownCommand(input, command);
           ++session.Get()->edit_revision;
           Schedule(session.Get(), tasks, draft.Get().text, document, status);
         } catch (const std::exception& error) { status = std::string("无法格式化：") + error.what(); }
       }).Key(key));
     };
-    if (editing.Get()) {
+    if (editing.Get() || document_mode) {
       add_command("粗体", "format-bold", MarkdownEditCommand::Bold);
       add_command("斜体", "format-italic", MarkdownEditCommand::Italic);
       add_command("代码", "format-code", MarkdownEditCommand::InlineCode);
+    }
+    if (editing.Get()) {
       add_command("标题", "format-heading", MarkdownEditCommand::Heading1);
       add_command("小标题", "format-heading2", MarkdownEditCommand::Heading2);
       add_command("列表", "format-list", MarkdownEditCommand::BulletList);
@@ -167,6 +195,7 @@ View App() {
           .rejected = [status](std::string_view error) mutable {
             status = "无法跨段编辑：" + std::string(error);
           },
+          .format_actions = format_actions,
       }).Key("writer-document");
     } else
 #endif

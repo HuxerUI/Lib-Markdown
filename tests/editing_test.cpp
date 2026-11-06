@@ -206,4 +206,36 @@ int main() { return Run([] {
   empty_document.Replace({0, 2}, {});
   CHECK(EditableMarkdownSource(empty_document.Current().document).empty());
   CHECK(empty_document.Current().document.Paragraphs().size() == 1);
+
+  using rich_text::detail::InlineFormat;
+  const auto format_source = "# First\r\n\r\nSecond\r\n\r\n- untouched";
+  markdown::detail::MarkdownDocumentEditSession format_session(format_source, blank_lines);
+  CHECK(format_session.ToggleMark({0, 0}, {1, 6}, NodeKind::Strong));
+  CHECK(format_session.Source() == "# **First**\r\n\r\n**Second**\r\n\r\n- untouched");
+  CHECK(format_session.ToggleMark({0, 0}, {1, 6}, NodeKind::Strong));
+  CHECK(format_session.Source() == format_source);
+
+  const std::string_view plain = "# First\r\n\r\nSecond\r\n\r\n*After*\r\n";
+  rich_text::detail::EditSession formatted(EditableMarkdownDocument(plain, blank_lines));
+  const auto original_format = formatted.Current().document;
+  const TextSelection backward_format{12, 0, TextAffinity::Upstream};
+  formatted.ToggleFormat(InlineFormat::Bold, backward_format);
+  CHECK(formatted.Current().selection == backward_format);
+  CHECK(EditableMarkdownSource(formatted.Current().document) == "# **First**\r\n\r\n**Second**\r\n\r\n*After*\r\n");
+  CHECK(formatted.Current().document.Paragraphs().back().id == original_format.Paragraphs().back().id);
+  formatted.ToggleFormat(InlineFormat::Italic, {0, 5});
+  CHECK(EditableMarkdownSource(formatted.Current().document).starts_with("# ***First***\r\n"));
+  formatted.ToggleFormat(InlineFormat::Code, {6, 12});
+  CHECK(EditableMarkdownSource(formatted.Current().document).find("**`Second`**") != std::string_view::npos);
+  CHECK(formatted.Undo());
+  CHECK(formatted.Undo());
+  CHECK(formatted.Undo());
+  CHECK(EditableMarkdownSource(formatted.Current().document) == plain);
+  CHECK(formatted.Current().selection == backward_format);
+  CHECK(formatted.Redo());
+  const auto before_format_composition = formatted.Current().document;
+  formatted.BeginComposition({0, 1});
+  Throws<std::invalid_argument>([&] { formatted.ToggleFormat(InlineFormat::Italic, {0, 5}); });
+  CHECK(formatted.Current().document == before_format_composition);
+  CHECK(formatted.CancelComposition());
 }); }

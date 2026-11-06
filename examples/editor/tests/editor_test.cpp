@@ -122,9 +122,17 @@ int main(int argc, char** argv) { return Run([&] {
   CHECK(ui.ActiveTextInput()->selection == (TextSelection{7, 7}));
   ui.PressKey(Key::Backspace);
   CHECK(ui.ActiveTextInput()->selection == (TextSelection{6, 6}));
+  const TextSelection heading_selection{6, 0, TextAffinity::Upstream};
+  CHECK(ui.SendTextInput({client, {{.kind = TextInputCommandKind::SetSelection, .selection_after = heading_selection}}})
+      .result_code == TextInputResultCode::Ok);
+  ui.Find(UiSelector::Key("format-bold")).Tap();
+  ui.Find(UiSelector::Text("Ti中文dy")).Tap();
+  ui.PressKey(Key::Z, {.control = true});
+  CHECK(ui.ActiveTextInput()->selection == heading_selection);
+  ui.PressKey(Key::Y, {.control = true});
   ui.Find(UiSelector::Key("writer-theme")).Tap();
   CHECK(surface.Exists() && ui.Find(UiSelector::Text("Ti中文dy")).Exists());
   ui.Find(UiSelector::Key("mode-toggle")).Tap();
-  CHECK(!surface.Exists() && source.One().value == "# Ti中文dy\r\n\r\n*After*\r\n");
+  CHECK(!surface.Exists() && source.One().value == "# **Ti中文dy**\r\n\r\n*After*\r\n");
 #endif
 }); }

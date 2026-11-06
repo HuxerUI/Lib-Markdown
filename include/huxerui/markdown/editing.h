@@ -66,7 +66,9 @@ private:
   unsigned heading_level_ = 0;
   ParseOptions options_;
   void Append(const MarkdownNode& node, std::vector<MarkdownTextMark> marks);
+  bool SetMark(TextRange range, NodeKind kind, bool enabled);
   [[nodiscard]] TextEditingValue Serialize(bool entities) const;
+  friend class detail::MarkdownDocumentEditSession;
 };
 
 /// Thread-confined block editing model. Source remains authoritative and is never

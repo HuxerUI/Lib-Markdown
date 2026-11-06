@@ -100,6 +100,32 @@ std::vector<MarkdownRichTextRun> MarkdownRichText::Runs() const {
   }
   return result;
 }
+
+bool MarkdownRichText::SetMark(TextRange range, NodeKind kind, bool enabled) {
+  (void)AttributedText(value_.text).TextInRange(range);
+  bool changed = false;
+  TextOffset offset = 0;
+  for (auto& character : characters_) {
+    if (offset >= range.end) break;
+    if (offset >= range.start) {
+      const auto same_mark = [kind](const MarkdownTextMark& mark) { return mark.kind == kind; };
+      if (!enabled) {
+        changed |= std::erase_if(character.marks, same_mark) != 0;
+      } else if (!std::ranges::any_of(character.marks, same_mark)) {
+        // CommonMark parses a triple delimiter with emphasis outside strong.
+        // Code consumes literal text, so other marks must wrap it.
+        const auto inner = std::ranges::find_if(character.marks, [kind](const MarkdownTextMark& mark) {
+          return mark.kind == NodeKind::Code || (kind == NodeKind::Emphasis && mark.kind == NodeKind::Strong);
+        });
+        character.marks.insert(inner, MarkdownTextMark{kind, {}, {}});
+        changed = true;
+      }
+    }
+    offset += character.text.size() == 4 ? 2 : 1;
+  }
+  return changed;
+}
+
 TextEditingValue MarkdownRichText::Serialize(bool entities) const {
   std::string source;
   std::vector<std::size_t> starts(characters_.size()), ends(characters_.size());

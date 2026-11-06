@@ -58,6 +58,23 @@ public:
     return editor::Document(std::move(paragraphs), std::move(next));
   }
 
+  editor::Document ToggleFormat(const editor::Document& document, TextRange target,
+                                editor::InlineFormat format) const override {
+    NodeKind mark;
+    switch (format) {
+    case editor::InlineFormat::Bold: mark = NodeKind::Strong; break;
+    case editor::InlineFormat::Italic: mark = NodeKind::Emphasis; break;
+    case editor::InlineFormat::Code: mark = NodeKind::Code; break;
+    default: throw std::invalid_argument("Markdown inline format is invalid");
+    }
+    const auto first = document.Locate(target.start);
+    const auto last = document.Locate(target.end);
+    auto next = std::make_shared<MarkdownBacking>(*this);
+    if (!next->session_.ToggleMark({first.index, first.offset}, {last.index, last.offset}, mark)) return document;
+    const auto paragraphs = document.Paragraphs();
+    return editor::Document({paragraphs.begin(), paragraphs.end()}, std::move(next));
+  }
+
 private:
   AttributedText ParagraphText(std::size_t index) const {
     const auto& node = session_.Block(index);
