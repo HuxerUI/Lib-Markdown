@@ -18,10 +18,8 @@ if(ANDROID AND HUXERUI_ANDROID_RESOURCE_OUTPUT_ROOT)
 endif()
 huxerui_add_app(markdown_editor SOURCES src/app.cpp src/main.cpp src/source_editor.cpp
     BUNDLE_NAME "Markdown Writer" BUNDLE_IDENTIFIER "org.huxerui.markdown.editor"
+    RESOURCES resources RESOURCE_NAMESPACE markdown_writer
     ${_writer_resource_output})
-huxerui_add_resources(markdown_editor
-    ROOT "${CMAKE_CURRENT_SOURCE_DIR}/resources"
-    NAMESPACE "markdown_writer")
 if(TARGET HuxerUI::Markdown)
     huxerui_use_library(markdown_editor TARGET HuxerUI::Markdown)
 else()
