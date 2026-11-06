@@ -67,6 +67,11 @@ int main(int argc, char** argv) { return Run([&] {
   CHECK(tab_source.One().value->starts_with("# 开始写作\n"));
   ui.Find(UiSelector::Key("writer-tabs")).Find(UiSelector::Text("文档 2")).Tap();
   CHECK(tab_source.One().value == "# 第二篇\n\n独立草稿");
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+  ui.Find(UiSelector::Key("mode-toggle")).Tap();
+  CHECK(ui.Find(UiSelector::Key("rich-text-editor")).Find(UiSelector::Text("独立草稿")).Exists());
+  ui.Find(UiSelector::Key("mode-toggle")).Tap();
+#endif
   ui.Find(UiSelector::Key("writer-close-tab")).Tap();
   CHECK(tab_source.One().value->starts_with("# 开始写作\n"));
   ui.Find(UiSelector::Key("mode-toggle")).Tap();

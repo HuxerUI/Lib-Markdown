@@ -68,6 +68,21 @@ struct WriterTab {
   bool operator==(const WriterTab&) const = default;
 };
 
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+std::optional<std::string> PrepareDocumentEditor(WriterTab& tab) {
+  try {
+    auto document = huxerui::markdown::detail::EditableMarkdownDocument(tab.draft.text, WriterOptions());
+    if (!tab.editor) tab.editor = std::make_shared<rich_text::detail::EditSession>(std::move(document));
+    else if (huxerui::markdown::detail::EditableMarkdownSource(tab.editor->Current().document) != tab.draft.text)
+      tab.editor->Import(std::move(document));
+    return std::nullopt;
+  } catch (const std::exception& error) {
+    tab.editor.reset();
+    return error.what();
+  }
+}
+#endif
+
 bool Publish(const std::shared_ptr<WriterSession>& session, const std::string& source,
              State<MarkdownDocument> document, State<std::string> status) {
   try {
@@ -146,21 +161,19 @@ View App() {
       updated[selected_tab.Get()].draft = draft.Get();
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
       updated[selected_tab.Get()].editor = document_editor.Get();
-      auto editor = updated[index].editor;
-      if (!editor) {
-        try {
-          editor = std::make_shared<rich_text::detail::EditSession>(
-              huxerui::markdown::detail::EditableMarkdownDocument(updated[index].draft.text, WriterOptions()));
-        } catch (const std::exception&) { editing = true; }
-      }
-      document_editor = std::move(editor);
+      const auto restore_error = PrepareDocumentEditor(updated[index]);
+      document_editor = updated[index].editor;
       document_active = !editing.Get() && document_editor.Get() != nullptr;
       preferred_document_mode = true;
+      if (restore_error) editing = true;
 #endif
       draft = updated[index].draft;
       tabs = std::move(updated);
       selected_tab = index;
       (void)Publish(session.Get(), draft.Get().text, document, status);
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+      if (restore_error) status = "当前文件需要源码模式：" + *restore_error;
+#endif
     };
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
     const bool document_mode = document_active.Get();
@@ -467,12 +480,17 @@ View App() {
           selected_tab = index;
           draft = updated[index].draft;
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+          const auto restore_error = PrepareDocumentEditor(updated[index]);
           document_editor = updated[index].editor;
           document_active = !editing.Get() && document_editor.Get() != nullptr;
           preferred_document_mode = true;
+          if (restore_error) editing = true;
 #endif
           tabs = std::move(updated);
           (void)Publish(session.Get(), draft.Get().text, document, status);
+#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
+          if (restore_error) status = "当前文件需要源码模式：" + *restore_error;
+#endif
         }).Key("writer-close-tab"),
       }.With(Padding(EdgeInsets::Symmetric(compact ? 8.0F : 16.0F, 4.0F)), Spacing(8.0F), Background{theme.colors.surface}),
       Flow(std::move(toolbar)).With(Padding(EdgeInsets::Symmetric(compact ? 8.0F : 16.0F, 6.0F)), Spacing(8.0F)).Key("writer-toolbar"),
