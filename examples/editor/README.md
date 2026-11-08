@@ -65,8 +65,8 @@ Linux 包依赖系统提供 GTK4、libepoxy 和 libsoup 3；DEB/RPM 安装后可
 ```powershell
 git clone https://github.com/FarnaHerry/HuxerUI.git .cache/writer-sdk
 git -C .cache/writer-sdk checkout --detach 554d9a540b40fa5a7b51125218a80166c86d8679
-git -C .cache/writer-sdk fetch https://github.com/HuxerUI/HuxerUI.git 511cd16db7d7a621876ad942b5c3161ba0392c49
-git -C .cache/writer-sdk cherry-pick --no-commit 511cd16db7d7a621876ad942b5c3161ba0392c49
+git -C .cache/writer-sdk fetch https://github.com/HuxerUI/HuxerUI.git e29c3c2573dcd7db201e7523ff59803529875d52
+git -C .cache/writer-sdk cherry-pick --no-commit e29c3c2573dcd7db201e7523ff59803529875d52
 cmake -S examples/editor -B build-writer-experiment -DHUXERUI_HOME="$PWD/.cache/writer-sdk" -DHUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE=ON
 cmake --build build-writer-experiment --config Release --parallel
 .\build-writer-experiment\Release\markdown_editor.exe

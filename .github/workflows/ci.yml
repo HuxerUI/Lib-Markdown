@@ -51,7 +51,7 @@ jobs:
       - name: Apply attributed TextField PR 153
         shell: pwsh
         run: |
-          $revision = '511cd16db7d7a621876ad942b5c3161ba0392c49'
+          $revision = 'e29c3c2573dcd7db201e7523ff59803529875d52'
           git -C .cache/HuxerUI fetch --no-tags https://github.com/HuxerUI/HuxerUI.git $revision
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           git -C .cache/HuxerUI cherry-pick --no-commit $revision

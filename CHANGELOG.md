@@ -15,6 +15,8 @@
 - Align with current HuxerUI conventions: remove command-only `nodiscard` annotations, simplify
   `State` reads, clarify platform terminology, and centralize explicit result discarding with a
   small library-private helper while preserving validation and subscription behavior.
+- Use the conflict-free functional TextStyles commit from PR #153 when composing the temporary
+  SDK for CI and release packaging, avoiding a conflict in its later style-only follow-up.
 
 ## 0.2.2 (2026-11-06)
 
