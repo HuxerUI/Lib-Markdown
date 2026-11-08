@@ -1,4 +1,4 @@
-#include "model.h"
+#include "rich_text_model.h"
 #include "test.h"
 
 #include <array>

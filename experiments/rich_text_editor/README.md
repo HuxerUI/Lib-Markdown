@@ -1,8 +1,10 @@
 # Rich Text Editor prototype
 
-The standalone example builds with HuxerUI and an attributed paragraph model. Each visible paragraph uses `Text(AttributedText)`. The virtual list has one document-level input and selection client. Paragraphs retain their logical IDs through selection, editing and scroll eviction.
+The standalone example builds with HuxerUI and an attributed paragraph model. Each visible paragraph uses `Text(AttributedText)`; the virtual list has one document-level input and selection client. Paragraphs retain their logical IDs through selection, editing and scroll eviction.
 
-Use the HuxerUI paragraph geometry SDK at [`e119529`](https://github.com/FarnaHerry/HuxerUI/commit/e119529d4fe118b0b4df4a0a306df6819814d7a0).
+The model and view now live in `src/rich_text_model.*` and `src/rich_text_editor.*`, shared with the public Markdown editor and Writer. This prototype builds those same sources without adding another implementation.
+
+Use HuxerUI paragraph geometry from [PR #154](https://github.com/HuxerUI/HuxerUI/pull/154), reviewed at [`554d9a5`](https://github.com/HuxerUI/HuxerUI/commit/554d9a540b40fa5a7b51125218a80166c86d8679).
 
 ```powershell
 cmake -S experiments/rich_text_editor -B build-rich-text -DHUXERUI_HOME=/path/to/HuxerUI -DHUXERUI_BUILD_TESTING_LIBRARY=ON

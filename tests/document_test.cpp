@@ -1,4 +1,5 @@
 #include <huxerui/markdown/document.h>
+#include "../src/discard.h"
 #include "test.h"
 
 using namespace huxerui::markdown;
@@ -77,7 +78,7 @@ int main() { return Run([] {
   CHECK(ParseMarkdown("one  \ntwo", {.soft_break_mode = SoftBreakMode::Space}).PlainText() == "one\ntwo");
   CHECK(ParseMarkdown("```\none\ntwo\n```", {.soft_break_mode = SoftBreakMode::Space}).PlainText() == "one\ntwo\n");
   CHECK(ParseMarkdown("`one\ntwo`", {.soft_break_mode = SoftBreakMode::LineBreak}).PlainText() == "one two");
-  Throws<std::invalid_argument>([] { (void)ParseMarkdown("", {.soft_break_mode = static_cast<SoftBreakMode>(99)}); });
+  Throws<std::invalid_argument>([] { LIB_MARKDOWN_DISCARD(ParseMarkdown("", {.soft_break_mode = static_cast<SoftBreakMode>(99)})); });
   CHECK(ParseMarkdown("\xE4\xB8\xAD\xE6\x96\x87 **\xF0\x9F\x98\x80**").PlainText() == "\xE4\xB8\xAD\xE6\x96\x87 \xF0\x9F\x98\x80");
   CHECK(ParseMarkdown("first\r\n\r\nsecond\r\n").PlainText() == "first\nsecond");
   CHECK(ParseMarkdown("> quote\n>\n> - item\n\n---").Root().children.back().kind == NodeKind::ThematicBreak);
@@ -90,14 +91,14 @@ int main() { return Run([] {
   const auto no_auto = ParseMarkdown("https://example.com", {.autolinks = {false, false, false}});
   CHECK(no_auto.Root().children.front().children.front().kind == NodeKind::Text);
 
-  Throws<std::invalid_argument>([] { (void)ParseMarkdown("\xC0\xAF"); });
-  Throws<std::invalid_argument>([] { (void)ParseMarkdown("\xF0\x9F"); });
-  Throws<std::invalid_argument>([] { (void)ParseMarkdown("\xED\xA0\x80"); });
-  Throws<std::invalid_argument>([] { (void)ParseMarkdown("\xF4\x90\x80\x80"); });
-  Throws<std::invalid_argument>([] { (void)ParseMarkdown("x", {.max_nesting = 0}); });
-  Throws<std::invalid_argument>([] { (void)ParseMarkdown("x", {.max_nesting = 513}); });
-  Throws<std::length_error>([] { (void)ParseMarkdown("long", {.max_input_bytes = 3}); });
-  Throws<std::length_error>([] { (void)ParseMarkdown("> > > > nested", {.max_nesting = 2}); });
+  Throws<std::invalid_argument>([] { LIB_MARKDOWN_DISCARD(ParseMarkdown("\xC0\xAF")); });
+  Throws<std::invalid_argument>([] { LIB_MARKDOWN_DISCARD(ParseMarkdown("\xF0\x9F")); });
+  Throws<std::invalid_argument>([] { LIB_MARKDOWN_DISCARD(ParseMarkdown("\xED\xA0\x80")); });
+  Throws<std::invalid_argument>([] { LIB_MARKDOWN_DISCARD(ParseMarkdown("\xF4\x90\x80\x80")); });
+  Throws<std::invalid_argument>([] { LIB_MARKDOWN_DISCARD(ParseMarkdown("x", {.max_nesting = 0})); });
+  Throws<std::invalid_argument>([] { LIB_MARKDOWN_DISCARD(ParseMarkdown("x", {.max_nesting = 513})); });
+  Throws<std::length_error>([] { LIB_MARKDOWN_DISCARD(ParseMarkdown("long", {.max_input_bytes = 3})); });
+  Throws<std::length_error>([] { LIB_MARKDOWN_DISCARD(ParseMarkdown("> > > > nested", {.max_nesting = 2})); });
   CHECK(ParseMarkdown("ok", {.max_input_bytes = 2}).PlainText() == "ok");
   CHECK(ParseMarkdown(std::string(10000, '*')).Root().children.size() == 1);
 

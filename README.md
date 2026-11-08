@@ -254,11 +254,11 @@ With Visual Studio, launch `build-preview/Release/markdown_preview.exe`; keep it
 artifact after its standalone build and interaction tests pass.
 
 The separate [Markdown Writer](examples/editor/README.md) is the experimental
-Typora-inspired editing demo. Supported paragraphs, headings, nested list and quote
-text, and table cells edit directly with their existing typography.
-The native attributed paragraph owns drawing, caret, selection and IME geometry.
-In-place source editing covers code blocks and complex content with a verified
-range. Use full-source mode for structural changes and context-dependent ranges.
+Typora-inspired editing demo. The public `MarkdownEditor` now uses one source-backed
+document transaction for supported rich text, including cross-block selection, IME,
+Enter/Backspace and undo/redo with whole-source selection reporting. Nested lists,
+quotes and explicit table cells share the same session; complex structures still use
+verified block or full-source editing. Writer retains an independent history per tab.
 See [block editing](docs/block-editing.md) and [the follow-up plan](docs/editor-follow-up.md).
 
 ```sh
@@ -271,11 +271,12 @@ resource directory. A root build with examples enabled builds both demos.
 
 ## Build and test
 
-Requires CMake 3.20+, a C99/C++20 toolchain, and a recent HuxerUI source tree or
-SDK with `TextField::TextStyles`, `AttributedText`, and `SelectionArea`.
-The verified HuxerUI revision is `e29c3c2573dcd7db201e7523ff59803529875d52`,
-currently on [feat/text-field-attributed-styles](https://github.com/HuxerUI/HuxerUI/tree/feat/text-field-attributed-styles).
-That dependency change is published separately; CI pins the exact commit.
+Requires CMake 3.20+, a C99/C++20 toolchain, and HuxerUI with both
+`TextField::TextStyles` and `TextMeasurer::LayoutText`/`TextParagraphLayout`.
+Until the changes reach the SDK main branch, native CI combines
+[PR #153](https://github.com/HuxerUI/HuxerUI/pull/153) (`511cd16`) and
+[PR #154](https://github.com/HuxerUI/HuxerUI/pull/154) (`554d9a5`). Parser-only builds
+need no HuxerUI dependency.
 
 ```sh
 cmake -S . -B build -DHUXERUI_HOME=/path/to/HuxerUI \
@@ -311,8 +312,9 @@ enabling compilers or building MD4C. The library has no generated resource packa
 Task checkboxes are presentation only. Code blocks use wrapped monospace text by
 default; provide a renderer for highlighting or different scrolling. Table columns
 have a configurable fixed width, with per-cell wrapping and GFM alignment.
-Mathematical typesetting, diagrams, HTML execution and a reusable visual editor component are outside
-this version. Virtualization operates at top-level blocks; streaming uses ordinary
+Mathematical typesetting, diagrams and HTML execution are outside this version.
+`MarkdownEditor` provides source-backed rich editing, with block/source fallback for
+unsupported structures. Virtualization operates at top-level blocks; streaming uses ordinary
 Markdown semantics without inventing a partial-input grammar.
 
 ## License

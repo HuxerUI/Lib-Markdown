@@ -91,6 +91,45 @@ int main(int argc, char** argv) { return Run([&] {
   ui.Find(UiSelector::Key("writer-tabs")).Find(UiSelector::Text("文档 2")).Tap();
   CHECK(switched_surface.Find(UiSelector::Text("独立草稿")).Exists());
   CHECK(!switched_surface.Find(UiSelector::Text("开始写作")).Exists());
+  switched_surface.Find(UiSelector::Text("独立草稿")).Tap();
+  const auto second_client = ui.ActiveTextInput()->session_id;
+  CHECK(ui.SendTextInput({second_client, {{.kind = TextInputCommandKind::SetSelection,
+      .selection_after = TextSelection{8, 8}}}}).result_code == TextInputResultCode::Ok);
+  CHECK(ui.SendTextInput({second_client, {{.kind = TextInputCommandKind::CommitText,
+      .text = "二改"}}}).result_code == TextInputResultCode::Ok);
+  ui.Pump();
+  CHECK(switched_surface.Find(UiSelector::Text("独立草稿二改")).Exists());
+  ui.Find(UiSelector::Key("writer-tabs")).Find(UiSelector::Text("开始写作")).Tap();
+  switched_surface.Find(UiSelector::Text("开始写作")).Tap();
+  const auto first_client = ui.ActiveTextInput()->session_id;
+  CHECK(ui.SendTextInput({first_client, {{.kind = TextInputCommandKind::SetSelection,
+      .selection_after = TextSelection{4, 4}}}}).result_code == TextInputResultCode::Ok);
+  CHECK(ui.SendTextInput({first_client, {{.kind = TextInputCommandKind::CommitText,
+      .text = "一改"}}}).result_code == TextInputResultCode::Ok);
+  ui.Pump();
+  CHECK(switched_surface.Find(UiSelector::Text("开始写作一改")).Exists());
+  ui.Find(UiSelector::Key("writer-tabs")).Find(UiSelector::Text("文档 2")).Tap();
+  switched_surface.Find(UiSelector::Text("独立草稿二改")).Tap();
+  ui.PressKey(Key::Z, {.control = true});
+  ui.Pump();
+  CHECK(switched_surface.Find(UiSelector::Text("独立草稿")).Exists());
+  CHECK(!switched_surface.Find(UiSelector::Text("独立草稿二改")).Exists());
+  ui.PressKey(Key::Y, {.control = true});
+  ui.Pump();
+  CHECK(switched_surface.Find(UiSelector::Text("独立草稿二改")).Exists());
+  ui.PressKey(Key::Z, {.control = true});
+  ui.Pump();
+  ui.Find(UiSelector::Key("writer-tabs")).Find(UiSelector::Text("开始写作")).Tap();
+  switched_surface.Find(UiSelector::Text("开始写作一改")).Tap();
+  ui.PressKey(Key::Z, {.control = true});
+  ui.Pump();
+  CHECK(switched_surface.Find(UiSelector::Text("开始写作")).Exists());
+  CHECK(!switched_surface.Find(UiSelector::Text("开始写作一改")).Exists());
+  ui.PressKey(Key::Y, {.control = true});
+  ui.Pump();
+  CHECK(switched_surface.Find(UiSelector::Text("开始写作一改")).Exists());
+  ui.PressKey(Key::Z, {.control = true});
+  ui.Pump();
   ui.Find(UiSelector::Key("mode-toggle")).Tap();
 #endif
   const auto close_tab_bounds = ui.Find(UiSelector::Key("writer-tab-2")).One().bounds;

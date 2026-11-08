@@ -26,7 +26,8 @@ std::vector<TextStyleRange> BuildEditableStyles(const MarkdownRichText& rich, co
                                                 const MarkdownStyle& theme, const MarkdownLinkPolicy& policy);
 std::vector<std::vector<std::size_t>> DocumentEditablePaths(const MarkdownDocument& document, std::string_view source,
                                                           std::size_t block);
-View RenderEditableBlock(const MarkdownNode& node, const MarkdownStyle& style,
+View RenderEditableBlock(const MarkdownNode& node, const MarkdownOptions& options, const MarkdownStyle& style,
+                         EventEmitter events,
                          std::function<std::optional<View>(const MarkdownNode&, TextStyle, TextAlign)> editor);
 
 } // namespace huxerui::markdown::detail

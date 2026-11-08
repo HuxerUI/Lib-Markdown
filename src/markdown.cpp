@@ -11,6 +11,8 @@
 
 #include "inline.h"
 #include "editing_internal.h"
+#include "document_editor_internal.h"
+#include "discard.h"
 
 namespace huxerui::markdown {
 namespace {
@@ -105,8 +107,8 @@ struct InlineBuilder {
       for (const auto& child : node.children) Visit(child, style);
       if (allowed && length > begin) {
         auto uri = node.kind == NodeKind::Link ? Uri::Parse(node.destination) : std::optional<Uri>{};
-        // Native Uri requires an absolute ASCII URI. Keep relative/Unicode originals
-        // separately and use an inert identity for the native text interaction.
+        // Uri requires an absolute ASCII URI. Keep relative/Unicode originals
+        // separately and use an inert identity for the text interaction.
         if (!uri) uri = Uri("huxerui-markdown:link-" + std::to_string(originals.size()));
         links.push_back({{begin, length}, std::move(*uri)});
         originals.push_back({{begin, length}, node.destination, node.kind,
@@ -203,7 +205,7 @@ private:
                     events = events_, interactive = interactive_, selection_id]() -> View {
         auto revealed = UseState(std::set<unsigned>{});
         auto previous = UseState(owned);
-        if (previous.Get() != owned) { previous = owned; revealed = std::set<unsigned>{}; }
+        if (previous != owned) { previous = owned; revealed = std::set<unsigned>{}; }
         auto content = detail::BuildInline(owned, theme, policy, &revealed.Get());
         auto attributed = content.text;
         if (!interactive) {
@@ -469,7 +471,7 @@ bool EmptyForEditing(const MarkdownDocument& document) {
 
 // The same TextField stays mounted while its presentation changes. In reading
 // presentation it is a transparent input backing beneath noninteractive Markdown;
-// a real pointer/Tab focus enters the native client without synthetic input or a
+// a real pointer/Tab focus enters the client without synthetic input or a
 // second click. Exact glyph-to-source caret mapping is deliberately not promised.
 class EditableBlockLayout final : public Layout<EditableBlockLayout> {
 public:
@@ -628,6 +630,13 @@ struct BlockEditorState {
   }
 };
 
+struct DocumentEditorState {
+  ParseOptions parse_options;
+  std::string attempted_source;
+  std::shared_ptr<rich_text::detail::EditSession> edit;
+  std::uint64_t generation = 0;
+};
+
 struct EditorRenderContext {
   std::shared_ptr<BlockEditorState> state;
   MarkdownDocument layout_document;
@@ -664,7 +673,7 @@ View EditableField(const EditorRenderContext& context, std::shared_ptr<const Vir
         .LineLimits(TextFieldLineLimits::MultiLine(1))
         .Align(alignment).VerticalAlign(TextVerticalAlign::Top)
         .OnChanged([=](const TextEditingValue& next) mutable {
-          if (input_generation.Get() != generation) return;
+          if (input_generation != generation) return;
           bool activated = false;
           try {
             activated = state->Activate(layout_document, path);
@@ -674,7 +683,7 @@ View EditableField(const EditorRenderContext& context, std::shared_ptr<const Vir
             events.Emit<MarkdownEditorEvents::Changed>(whole);
           } catch (const std::exception& error) {
             // A rejected controlled proposal may still live in TextField's
-            // native client. Retire that client rather than displaying text
+            // client. Retire that client rather than displaying text
             // which was never accepted into the document.
             input_generation = generation + 1;
             if (activated) {
@@ -688,19 +697,19 @@ View EditableField(const EditorRenderContext& context, std::shared_ptr<const Vir
             }
             report(error);
           }
-          revision = revision.Get() + 1;
+          ++revision;
         }).On<ViewEvents::FocusChanged>([=](bool focused) mutable {
-          if (input_generation.Get() != generation) return;
+          if (input_generation != generation) return;
           try {
             if (focused) {
-              (void)state->Activate(layout_document, path);
-              revision = revision.Get() + 1;
+              state->Activate(layout_document, path);
+              ++revision;
             } else if (state->IsActive(layout_document, path)) {
               const auto epoch = state->focus_epoch;
               // Defer closure so focus can first enter another backing field.
               tasks.Post([=]() mutable {
                 if (state->focus_epoch != epoch || !state->session.EditingBlock() || state->session.EditingValue().composition) return;
-                try { state->EndEdit(); ++state->focus_epoch; revision = revision.Get() + 1; }
+                try { state->EndEdit(); ++state->focus_epoch; ++revision; }
                 catch (const std::exception& error) { report(error); }
               });
             }
@@ -712,7 +721,7 @@ View EditableField(const EditorRenderContext& context, std::shared_ptr<const Vir
             state->EndEdit();
             ++state->focus_epoch;
             input_generation = generation + 1;
-            revision = revision.Get() + 1;
+            ++revision;
           }
           catch (const std::exception& error) { report(error); }
           return true;
@@ -783,7 +792,7 @@ std::vector<std::vector<std::size_t>> DocumentEditablePaths(const MarkdownDocume
   const auto& node = document.Root().children.at(block);
   NodePath root{block};
   EditablePaths paths;
-  (void)CollectEditablePaths(document, source, true, node, root, paths);
+  CollectEditablePaths(document, source, true, node, root, paths);
   std::vector<NodePath> ordered;
   for (auto& [leaf, path] : paths) {
     if (MarkdownRichText::Supports(*leaf)) ordered.push_back(std::move(path));
@@ -792,10 +801,10 @@ std::vector<std::vector<std::size_t>> DocumentEditablePaths(const MarkdownDocume
   return ordered;
 }
 
-View RenderEditableBlock(const MarkdownNode& node, const MarkdownStyle& style,
+View RenderEditableBlock(const MarkdownNode& node, const MarkdownOptions& options, const MarkdownStyle& style,
+                         EventEmitter events,
                          std::function<std::optional<View>(const MarkdownNode&, TextStyle, TextAlign)> editor) {
-  const MarkdownOptions options{.selectable = false};
-  return Renderer(options, style, {}, nullptr, false, std::move(editor)).RenderBlock(node);
+  return Renderer(options, style, std::move(events), nullptr, false, std::move(editor)).RenderBlock(node);
 }
 } // namespace detail
 
@@ -887,12 +896,12 @@ View VirtualizedMarkdown(MarkdownDocument document, MarkdownOptions options,
   });
 }
 
-View MarkdownEditor(TextEditingValue value, MarkdownEditorOptions options) {
+View detail::MarkdownBlockEditor(TextEditingValue value, MarkdownEditorOptions options) {
   // Reuse TextField's UTF-8/scalar validation before mounting anything.
   const AttributedText text(value.text);
-  (void)text.TextInRange({0, value.selection.anchor});
-  (void)text.TextInRange({0, value.selection.active});
-  if (value.composition) (void)text.TextInRange(*value.composition);
+  LIB_MARKDOWN_DISCARD(text.TextInRange({0, value.selection.anchor}));
+  LIB_MARKDOWN_DISCARD(text.TextInRange({0, value.selection.active}));
+  if (value.composition) LIB_MARKDOWN_DISCARD(text.TextInRange(*value.composition));
   if (value.selection.affinity != TextAffinity::Upstream && value.selection.affinity != TextAffinity::Downstream)
     throw std::invalid_argument("Invalid Markdown editor selection affinity");
   if (options.markdown_options.style) ValidateStyle(*options.markdown_options.style);
@@ -910,7 +919,7 @@ View MarkdownEditor(TextEditingValue value, MarkdownEditorOptions options) {
     }
     const auto state = holder.Get();
     auto revision = UseState(std::uint64_t{0});
-    (void)revision.Get();
+    LIB_MARKDOWN_DISCARD(revision.Get());
     const auto events = UseEvents();
     const auto tasks = UseTaskScope();
     if (state->session.Source() != value.text) {
@@ -934,11 +943,11 @@ View MarkdownEditor(TextEditingValue value, MarkdownEditorOptions options) {
             try {
               state->session.UpdateSource(next.text);
               events.Emit<MarkdownEditorEvents::Changed>(next);
-              revision = revision.Get() + 1;
+              ++revision;
             } catch (const std::exception& error) { report(error); }
           }).On<ViewEvents::FocusChanged>([=](bool focused) mutable {
             if (!focused && !EmptyForEditing(state->session.Document())) {
-              tasks.Post([=]() mutable { state->empty_mode = false; revision = revision.Get() + 1; });
+              tasks.Post([=]() mutable { state->empty_mode = false; ++revision; });
             }
           }).Key("markdown-empty-input");
       return ScrollView(Column{
@@ -957,7 +966,7 @@ View MarkdownEditor(TextEditingValue value, MarkdownEditorOptions options) {
     auto list = VirtualList(snapshot->blocks.size(), [=](std::size_t index) -> View {
       const auto block = snapshot->blocks[index];
       return Scope([=]() -> View {
-        (void)revision.Get();
+        LIB_MARKDOWN_DISCARD(revision.Get());
         const auto field = [&](const NodePath& path, TextStyle base, TextAlign alignment) {
           return EditableField(editor, block, path, std::move(base), alignment);
         };
@@ -980,6 +989,61 @@ View MarkdownEditor(TextEditingValue value, MarkdownEditorOptions options) {
     }).EstimatedItemExtent(virtualization.estimated_block_extent).CacheExtent(virtualization.cache_extent);
     if (virtualization.scroll_controller) list = std::move(list).Controller(*virtualization.scroll_controller);
     return View(std::move(list));
+  });
+}
+
+View MarkdownEditor(TextEditingValue value, MarkdownEditorOptions options) {
+  if (!options.rich_text) return detail::MarkdownBlockEditor(std::move(value), std::move(options));
+  const AttributedText text(value.text);
+  LIB_MARKDOWN_DISCARD(text.TextInRange({0, value.selection.anchor}));
+  LIB_MARKDOWN_DISCARD(text.TextInRange({0, value.selection.active}));
+  if (value.composition) LIB_MARKDOWN_DISCARD(text.TextInRange(*value.composition));
+  if (value.selection.affinity != TextAffinity::Upstream && value.selection.affinity != TextAffinity::Downstream)
+    throw std::invalid_argument("Invalid Markdown editor selection affinity");
+  if (options.markdown_options.style) ValidateStyle(*options.markdown_options.style);
+  const auto& virtualization = options.virtualization;
+  if (!std::isfinite(virtualization.estimated_block_extent) || virtualization.estimated_block_extent <= 0 ||
+      !std::isfinite(virtualization.cache_extent) || virtualization.cache_extent < 0)
+    throw std::invalid_argument("Invalid Markdown editor virtualization extents");
+  return Scope([value = std::move(value), options = std::move(options)]() mutable -> View {
+    auto holder = UseState(std::shared_ptr<DocumentEditorState>{});
+    auto state = holder.Get();
+    if (!state || state->parse_options != options.parse_options) {
+      if (state && state->edit && state->edit->Composition())
+        throw std::logic_error("Finish IME composition before changing Markdown editor parsing options");
+      const auto generation = state ? state->generation + 1 : 0;
+      state = std::make_shared<DocumentEditorState>();
+      state->parse_options = options.parse_options;
+      state->generation = generation;
+      holder = state;
+    }
+    if (state->edit && detail::EditableMarkdownSource(state->edit->Current().document) != value.text) {
+      try {
+        state->edit->Import(detail::EditableMarkdownDocument(value.text, options.parse_options));
+        ++state->generation;
+      } catch (const std::invalid_argument&) {
+        state->edit.reset();
+        state->attempted_source = value.text;
+      }
+    }
+    if (!state->edit && state->attempted_source != value.text) {
+      state->attempted_source = value.text;
+      try {
+        state->edit = std::make_shared<rich_text::detail::EditSession>(
+            detail::EditableMarkdownDocument(value.text, options.parse_options));
+      } catch (const std::invalid_argument&) {
+        // The block path supports empty source and structures without a document projection.
+      }
+    }
+    if (!state->edit) return detail::MarkdownBlockEditor(value, options);
+    const auto events = UseEvents();
+    return detail::MarkdownDocumentEditor(state->edit, options,
+        [events](const TextEditingValue& next) mutable {
+          events.Emit<MarkdownEditorEvents::Changed>(next);
+        },
+        [events](std::string_view error) mutable {
+          events.Emit<MarkdownEditorEvents::Error>(std::string(error));
+        }).Key("markdown-document-" + std::to_string(state->generation));
   });
 }
 

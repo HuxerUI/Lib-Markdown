@@ -1,6 +1,7 @@
 #include <huxerui/huxerui.h>
 #include <huxerui/markdown.h>
 #include <huxerui/testing/ui_test.h>
+#include "../src/discard.h"
 #include "test.h"
 #include <cmath>
 #include <limits>
@@ -15,9 +16,9 @@ View MathRoot() { return math_root(); }
 int main() { return Run([] {
   auto invalid = MarkdownStyle{};
   invalid.blank_line_height = -1;
-  Throws<std::invalid_argument>([&] { (void)Markdown("x", {.style = invalid}); });
+  Throws<std::invalid_argument>([&] { LIB_MARKDOWN_DISCARD(Markdown("x", {.style = invalid})); });
   invalid.blank_line_height = std::numeric_limits<float>::quiet_NaN();
-  Throws<std::invalid_argument>([&] { (void)VirtualizedMarkdown("x", {.style = invalid}); });
+  Throws<std::invalid_argument>([&] { LIB_MARKDOWN_DISCARD(VirtualizedMarkdown("x", {.style = invalid})); });
   const auto document = ParseMarkdown("before $x^2$ after\n\n\nnext\n\n$$\\frac{a}{b}$$\n\n$x$",
       {.math = true, .preserve_blank_lines = true});
   for (const bool virtualized : {false, true}) {
@@ -31,11 +32,11 @@ int main() { return Run([] {
       blank_height = UseState(18.0F);
       clipboard = UseApplication().Clipboard();
       return ProvideEnvironment(TextSelectionMenuLabels{"Cut", "Copy", "Paste", "Select all"},
-          MaterialTheme(dark.Get() ? MaterialDarkThemeSpec() : MaterialLightThemeSpec(), Scope([&]() -> View {
+          MaterialTheme(dark ? MaterialDarkThemeSpec() : MaterialLightThemeSpec(), Scope([&]() -> View {
         auto style = MarkdownStyle::FromTheme(UseTheme());
-        style.blank_line_height = blank_height.Get();
+        style.blank_line_height = static_cast<float>(blank_height);
         MarkdownOptions options{.style = style};
-        if (custom.Get()) options.standalone_math_renderer = [&](const MarkdownNode& math) -> View {
+        if (custom) options.standalone_math_renderer = [&](const MarkdownNode& math) -> View {
           CHECK(math.children.empty());
           if (math.kind == NodeKind::DisplayMath) {
             ++display_calls;

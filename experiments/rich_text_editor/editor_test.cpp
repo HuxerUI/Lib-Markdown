@@ -1,4 +1,4 @@
-#include "editor.h"
+#include "rich_text_editor.h"
 #include "test.h"
 
 #include <huxerui/huxerui.h>

@@ -1,4 +1,5 @@
 #include <huxerui/markdown/document.h>
+#include "../src/discard.h"
 #include "test.h"
 #include <algorithm>
 #include <array>
@@ -51,7 +52,7 @@ int main() { return Run([] {
   }
   CHECK(editable == std::vector<std::string>({"# **标题😀**  ##", "中文 &amp; *斜体*\r\n第二行", "Setext\r\n---", "- item", "last"}));
   CHECK(!ParseMarkdown("plain").TopLevelSourceRange(0));
-  Throws<std::out_of_range>([] { (void)MarkdownDocument{}.TopLevelSourceRange(0); });
+  Throws<std::out_of_range>([] { LIB_MARKDOWN_DISCARD(MarkdownDocument{}.TopLevelSourceRange(0)); });
   for (const auto sample : {"#\n\nlast", "**\ninside\n**\n\nnext", "[x]: /url\n\n[x]\n", "\xEF\xBB\xBF# heading\n\nbody", "$x$\n\nnext", "\\\nnext", "`a\nb`\n\nnext", "foo\n===\n", "a\0b"})
     Verify(sample, ParseMarkdown(sample, options), options);
   const std::string structure = "- **same**\r\n  - **same**\r\n- [x] 完成\r\n\r\n> ## 内题 ##\r\n\r\n"

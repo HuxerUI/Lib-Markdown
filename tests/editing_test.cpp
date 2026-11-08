@@ -1,4 +1,5 @@
 #include <huxerui/markdown.h>
+#include "../src/discard.h"
 #include "document_editor_internal.h"
 #include "editing_internal.h"
 #include "test.h"
@@ -46,19 +47,19 @@ int main() { return Run([] {
   CHECK(ApplyMarkdownCommand(TextEditingValue::FromText(""), MarkdownEditCommand::Heading1).text == "# ");
   auto newline = TextEditingValue::FromText("a\nb");
   newline.selection = {0, 3};
-  Throws<std::invalid_argument>([&] { (void)ApplyMarkdownCommand(newline, MarkdownEditCommand::InlineCode); });
+  Throws<std::invalid_argument>([&] { LIB_MARKDOWN_DISCARD(ApplyMarkdownCommand(newline, MarkdownEditCommand::InlineCode)); });
   value.selection = {2, 2};
-  Throws<std::invalid_argument>([&] { (void)ApplyMarkdownCommand(value, MarkdownEditCommand::Bold); });
+  Throws<std::invalid_argument>([&] { LIB_MARKDOWN_DISCARD(ApplyMarkdownCommand(value, MarkdownEditCommand::Bold)); });
   value.selection = {-1, 0};
-  Throws<std::invalid_argument>([&] { (void)ApplyMarkdownCommand(value, MarkdownEditCommand::Bold); });
+  Throws<std::invalid_argument>([&] { LIB_MARKDOWN_DISCARD(ApplyMarkdownCommand(value, MarkdownEditCommand::Bold)); });
   value.selection = {0, 99};
-  Throws<std::invalid_argument>([&] { (void)ApplyMarkdownCommand(value, MarkdownEditCommand::Bold); });
+  Throws<std::invalid_argument>([&] { LIB_MARKDOWN_DISCARD(ApplyMarkdownCommand(value, MarkdownEditCommand::Bold)); });
   value = TextEditingValue::FromText("中文");
   value.composition = TextRange{0, 2};
-  Throws<std::logic_error>([&] { (void)ApplyMarkdownCommand(value, MarkdownEditCommand::Bold); });
+  Throws<std::logic_error>([&] { LIB_MARKDOWN_DISCARD(ApplyMarkdownCommand(value, MarkdownEditCommand::Bold)); });
   CHECK(value.composition == (TextRange{0, 2}));
   value.composition.reset();
-  Throws<std::invalid_argument>([&] { (void)ApplyMarkdownCommand(value, static_cast<MarkdownEditCommand>(99)); });
+  Throws<std::invalid_argument>([&] { LIB_MARKDOWN_DISCARD(ApplyMarkdownCommand(value, static_cast<MarkdownEditCommand>(99))); });
   MarkdownBlockEditSession session("# keep\r\n\r\n中文😀\r\n\r\n- untouched\r\n");
   const auto base = session.Document();
   session.BeginEdit(1);
@@ -136,17 +137,17 @@ int main() { return Run([] {
 
   markdown::detail::MarkdownDocumentEditSession hidden("# A\n\n[id]: https://example.com\n\nBody\n");
   const auto hidden_source = std::string(hidden.Source());
-  Throws<std::invalid_argument>([&] { (void)hidden.Replace({0, 1}, {1, 1}, "x"); });
+  Throws<std::invalid_argument>([&] { hidden.Replace({0, 1}, {1, 1}, "x"); });
   CHECK(hidden.Source() == hidden_source);
 
   markdown::detail::MarkdownDocumentEditSession unicode("## A😀\n\nBody\n");
   const auto unicode_snapshot = unicode.Document();
-  Throws<std::invalid_argument>([&] { (void)unicode.Replace({0, 2}, {1, 1}, "x"); });
+  Throws<std::invalid_argument>([&] { unicode.Replace({0, 2}, {1, 1}, "x"); });
   CHECK(unicode.Document() == unicode_snapshot);
   CHECK(unicode.Source() == "## A😀\n\nBody\n");
 
   markdown::detail::MarkdownDocumentEditSession mixed("First\n\n- item\n\nLast\n");
-  Throws<std::invalid_argument>([&] { (void)mixed.Replace({0, 2}, {2, 1}, "replacement"); });
+  Throws<std::invalid_argument>([&] { mixed.Replace({0, 2}, {2, 1}, "replacement"); });
   CHECK(mixed.Source() == "First\n\n- item\n\nLast\n");
 
   using markdown::detail::EditableMarkdownDocument;
@@ -239,13 +240,15 @@ int main() { return Run([] {
   rich_text::detail::EditSession mixed_session(EditableMarkdownDocument(mixed_source, blank_lines));
   const auto mixed_document = mixed_session.Current().document;
   CHECK(mixed_document.TextInRange({0, mixed_document.Length()}) == "Mix\nparent\nnested\nquote\nA\nB\nc\nright");
-  const auto layout = markdown::detail::EditableMarkdownLayout(mixed_document, style);
+  const auto layout = markdown::detail::EditableMarkdownLayout(mixed_document, {}, style);
   CHECK(layout.item_ids.size() == 5);
   CHECK(layout.item_for_paragraph(1) == layout.item_for_paragraph(2));
   CHECK(layout.item_for_paragraph(4) == layout.item_for_paragraph(7));
   const auto nested_start = mixed_document.Start(2);
   mixed_session.Replace({nested_start, nested_start + 6}, "中文");
   CHECK(EditableMarkdownSource(mixed_session.Current().document).find("  - [x] 中文\r\n") != std::string_view::npos);
+  const auto nested_value = markdown::detail::EditableMarkdownValue(mixed_session.Current().document, mixed_session.Current().selection);
+  CHECK(AttributedText(nested_value.text).TextInRange({0, nested_value.selection.active}).ends_with("中文"));
   mixed_session.ToggleFormat(InlineFormat::Bold, {nested_start, nested_start + 2});
   CHECK(EditableMarkdownSource(mixed_session.Current().document).find("  - [x] **中文**\r\n") != std::string_view::npos);
   const auto table_start = mixed_session.Current().document.Start(7);

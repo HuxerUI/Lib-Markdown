@@ -6,7 +6,7 @@
 #include <huxerui/text.h>
 #include <huxerui/view.h>
 
-#include "model.h"
+#include "rich_text_model.h"
 
 namespace huxerui::rich_text {
 
@@ -31,8 +31,12 @@ struct EditorLayout {
 struct EditorOptions {
   std::optional<TextStyle> base_style;
   float paragraph_spacing = 0.0F;
+  /// Zero derives the estimate from the resolved font metrics.
+  float estimated_item_extent = 0.0F;
+  float cache_extent = 400.0F;
+  std::optional<ScrollController> scroll_controller;
   std::function<EditorLayout(const Document&)> layout;
-  std::function<void(const Document&, std::optional<TextRange>)> changed;
+  std::function<void(const Document&, TextSelection, std::optional<TextRange>)> changed;
   std::function<void(std::string_view)> rejected;
   std::shared_ptr<InlineFormatActions> format_actions;
 };

@@ -189,36 +189,36 @@ View App() {
   auto stats = UseState(MarkdownParseStats{});
   auto message = UseState(std::string("实时预览已开启，编辑源码后自动更新。"));
   Lifecycle([=]() mutable {
-    (void)session.Get()->parser.Update(Samples()[0].source);
+    session.Get()->parser.Update(Samples()[0].source);
     stats = session.Get()->parser.LastParseStats();
     return [session] { session.Get()->CancelPending(); session.Get()->CancelReplay(); };
   });
 
-  return MaterialTheme(dark.Get() ? MaterialDarkThemeSpec() : MaterialLightThemeSpec(), Scope([=] {
+  return MaterialTheme(dark ? MaterialDarkThemeSpec() : MaterialLightThemeSpec(), Scope([=] {
     const auto theme = UseTheme();
     const bool compact = UseViewportClass() == ViewportClass::Compact;
     std::vector<View> samples;
     for (std::size_t i = 0; i < Samples().size(); ++i) {
-      samples.push_back(Chip(Samples()[i].name, selected.Get() == i)
+      samples.push_back(Chip(Samples()[i].name, selected == i)
           .OnChanged([=](bool) mutable {
-            StopReplay(session.Get(), streaming);
+            StopReplay(session, streaming);
             selected = i;
             editor = SourceValue(Samples()[i].source);
-            RequestPreview(session.Get(), tasks, Samples()[i].source, document, stats, message, true);
-            document_version = document_version.Get() + 1;
+            RequestPreview(session, tasks, Samples()[i].source, document, stats, message, true);
+            ++document_version;
             custom = i == 3 || i == 6;
             message = "已载入：" + Samples()[i].name;
           }).Key("sample-" + std::to_string(i)));
     }
     MarkdownOptions options;
-    if (custom.Get()) {
+    if (custom) {
       options.code_block_renderer = [theme](const MarkdownNode& code) { return CodeCard(code, theme); };
       options.standalone_image_renderer = [theme](const MarkdownNode& image) { return LocalImage(image, theme); };
       options.standalone_math_renderer = [theme](const MarkdownNode& math) { return MathSourceCard(math, theme); };
     }
 
-    View rendered = virtualized.Get() ? VirtualizedMarkdown(document.Get(), std::move(options))
-                                    : Markdown(document.Get(), std::move(options));
+    View rendered = virtualized ? VirtualizedMarkdown(document, std::move(options))
+                                    : Markdown(document, std::move(options));
     rendered = std::move(rendered)
         .On<MarkdownEvents::LinkActivated>([message](const MarkdownLinkActivation& event) mutable {
           message = "链接：" + event.destination;
@@ -230,21 +230,21 @@ View App() {
           message = "脚注：" + event.label + " · " + std::to_string(event.number) +
               " · 引用 " + std::to_string(event.reference);
         });
-    if (!virtualized.Get()) rendered = ScrollView(std::move(rendered));
+    if (!virtualized) rendered = ScrollView(std::move(rendered));
     View preview = Panel("渲染预览", std::move(rendered)
         .With(ScrollBar{}).Key("preview-scroll"), theme)
         .Key(document_version.Get());
     View body = std::move(preview);
-    if (show_source.Get()) {
+    if (show_source) {
       View source = Panel("Markdown 源码", TextField(editor)
           .LineLimits(TextFieldLineLimits::MultiLine(1))
           .VerticalAlign(TextVerticalAlign::Top)
           .OnChanged([=](const TextEditingValue& next) mutable {
-            const bool changed = next.text != editor.Get().text;
+            const bool changed = next.text != editor->text;
             editor = next;
             if (!changed) return;
-            StopReplay(session.Get(), streaming);
-            if (live.Get()) RequestPreview(session.Get(), tasks, next.text, document, stats, message);
+            StopReplay(session, streaming);
+            if (live) RequestPreview(session, tasks, next.text, document, stats, message);
             else session.Get()->CancelPending();
           })
           .Key("source-editor"), theme);
@@ -258,50 +258,50 @@ View App() {
       Row{
         Text("Markdown Playground").Style({Font::System(compact ? 22.0F : 28.0F).WithWeight(FontWeight::Bold), theme.colors.on_surface})
             .With(Grow{}),
-        Button(dark.Get() ? "浅色主题" : "深色主题")
-            .OnClick([dark]() mutable { dark = !dark.Get(); }).Key("theme-toggle"),
+        Button(dark ? "浅色主题" : "深色主题")
+            .OnClick([dark]() mutable { dark = !dark; }).Key("theme-toggle"),
       }.With(Spacing(12.0F), CrossAlign(CrossAxisAlignment::Center)),
       Text("HuxerUI 原生 Markdown · 编辑、预览与组件扩展示例")
           .With(Foreground{theme.colors.on_surface_variant}),
       Flow(std::move(samples)).With(Spacing(8.0F)),
       Flow{
         Button("渲染").OnClick([=]() mutable {
-          StopReplay(session.Get(), streaming);
-          RequestPreview(session.Get(), tasks, editor.Get().text, document, stats, message, true);
+          StopReplay(session, streaming);
+          RequestPreview(session, tasks, editor->text, document, stats, message, true);
         }).Key("render"),
         Button("重置样例").OnClick([=]() mutable {
-          StopReplay(session.Get(), streaming);
-          editor = SourceValue(Samples()[selected.Get()].source);
-          RequestPreview(session.Get(), tasks, Samples()[selected.Get()].source, document, stats, message, true);
-          document_version = document_version.Get() + 1;
+          StopReplay(session, streaming);
+          editor = SourceValue(Samples()[selected].source);
+          RequestPreview(session, tasks, Samples()[selected].source, document, stats, message, true);
+          ++document_version;
           message = "已重置当前样例";
         }).Key("reset"),
-        Button(show_source.Get() ? "隐藏源码" : "显示源码")
-            .OnClick([show_source]() mutable { show_source = !show_source.Get(); }).Key("source-toggle"),
-        Checkbox("自定义渲染", custom.Get())
+        Button(show_source ? "隐藏源码" : "显示源码")
+            .OnClick([show_source]() mutable { show_source = !show_source; }).Key("source-toggle"),
+        Checkbox("自定义渲染", custom)
             .OnChanged([custom](bool enabled) mutable { custom = enabled; }).Key("custom-toggle"),
-        Checkbox("实时预览", live.Get()).OnChanged([=](bool enabled) mutable {
+        Checkbox("实时预览", live).OnChanged([=](bool enabled) mutable {
           live = enabled;
-          if (enabled) RequestPreview(session.Get(), tasks, editor.Get().text, document, stats, message);
+          if (enabled) RequestPreview(session, tasks, editor->text, document, stats, message);
           else { session.Get()->CancelPending(); message = "实时预览已暂停，点击渲染手动更新。"; }
         }).Key("live-toggle"),
-        Checkbox("虚拟化", virtualized.Get()).OnChanged([virtualized](bool enabled) mutable {
+        Checkbox("虚拟化", virtualized).OnChanged([virtualized](bool enabled) mutable {
           virtualized = enabled;
         }).Key("virtual-toggle"),
-        Button(streaming.Get() ? "停止流式" : "流式重放").OnClick([=]() mutable {
-          if (streaming.Get()) {
-            StopReplay(session.Get(), streaming);
+        Button(streaming ? "停止流式" : "流式重放").OnClick([=]() mutable {
+          if (streaming) {
+            StopReplay(session, streaming);
             message = "已停止流式重放";
           } else {
-            StartReplay(session.Get(), tasks, Samples()[selected.Get()].source,
+            StartReplay(session, tasks, Samples()[selected].source,
                         editor, document, stats, message, streaming);
-            document_version = document_version.Get() + 1;
+            ++document_version;
           }
         }).Key("stream-toggle"),
       }.With(Spacing(8.0F)),
       std::move(body).With(Grow{}),
       Text(message).With(Foreground{theme.colors.on_surface_variant}).Key("status"),
-      Text(DescribeParse(stats.Get())).With(Foreground{theme.colors.on_surface_variant}).Key("parse-stats"),
+      Text(DescribeParse(stats)).With(Foreground{theme.colors.on_surface_variant}).Key("parse-stats"),
     }.With(Padding(compact ? 12.0F : 24.0F), Spacing(12.0F), CrossAlign(CrossAxisAlignment::Stretch),
            Background{theme.colors.background});
   }));

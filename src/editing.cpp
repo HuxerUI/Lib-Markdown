@@ -5,6 +5,7 @@
 #include <string_view>
 
 #include "editing_internal.h"
+#include "discard.h"
 
 namespace huxerui::markdown {
 namespace {
@@ -20,11 +21,11 @@ ParseOptions EditingOptions(ParseOptions options) { options.source_ranges = true
 
 void ValidateEditingValue(const TextEditingValue& value) {
   const AttributedText text(value.text);
-  (void)text.TextInRange({0, value.selection.anchor});
-  (void)text.TextInRange({0, value.selection.active});
+  LIB_MARKDOWN_DISCARD(text.TextInRange({0, value.selection.anchor}));
+  LIB_MARKDOWN_DISCARD(text.TextInRange({0, value.selection.active}));
   if (value.selection.affinity != TextAffinity::Upstream && value.selection.affinity != TextAffinity::Downstream)
     throw std::invalid_argument("Invalid Markdown selection affinity");
-  if (value.composition) (void)text.TextInRange(*value.composition);
+  if (value.composition) LIB_MARKDOWN_DISCARD(text.TextInRange(*value.composition));
 }
 
 void ReplaceNestedContent(MarkdownNode& root, std::span<const std::size_t> path,
@@ -135,7 +136,7 @@ MarkdownRichText detail::RichProjection(const MarkdownNode& node, bool nested, P
 detail::MarkdownDocumentEditSession::MarkdownDocumentEditSession(std::string_view source, ParseOptions options)
     : options_(options), parser_(EditingOptions(options)) {
   options_.source_ranges = false;
-  (void)parser_.Update(source);
+  parser_.Update(source);
   const auto& nodes = Document().Root().children;
   for (std::size_t i = 0; i < nodes.size(); ++i) {
     if (nodes[i].kind != NodeKind::BlankLines) blocks_.push_back({i, Document().TopLevelSourceRange(i)});
@@ -193,8 +194,8 @@ detail::MarkdownBlockPosition detail::MarkdownDocumentEditSession::Replace(
   const MarkdownRichText tail(Block(last.block), options_);
   const AttributedText head_text(head.Value().text);
   const AttributedText tail_text(tail.Value().text);
-  (void)head_text.TextInRange({first.offset, first.offset});
-  (void)tail_text.TextInRange({last.offset, last.offset});
+  LIB_MARKDOWN_DISCARD(head_text.TextInRange({first.offset, first.offset}));
+  LIB_MARKDOWN_DISCARD(tail_text.TextInRange({last.offset, last.offset}));
   if (first.block == last.block && head_text.TextInRange({first.offset, last.offset}) == replacement) return last;
 
   const auto head_runs = head.Runs();
@@ -253,7 +254,7 @@ void detail::MarkdownDocumentEditSession::ReplaceNested(std::size_t block, std::
   const auto& node = NestedBlock(block, path);
   const auto rich = RichProjection(node, true, options_);
   const AttributedText original(rich.Value().text);
-  (void)original.TextInRange(range);
+  LIB_MARKDOWN_DISCARD(original.TextInRange(range));
   MarkdownNode edited;
   edited.kind = node.kind == NodeKind::Heading ? NodeKind::Paragraph : node.kind;
   const auto runs = rich.Runs();
@@ -306,7 +307,7 @@ bool detail::MarkdownDocumentEditSession::ToggleMark(MarkdownBlockPosition first
     const AttributedText displayed(text.Value().text);
     const TextRange selection{index == first.block ? first.offset : 0,
                               index == last.block ? last.offset : displayed.Length()};
-    (void)displayed.TextInRange(selection);
+    LIB_MARKDOWN_DISCARD(displayed.TextInRange(selection));
     if (!selection.IsCollapsed() && !enable) enable = MissingMark(text, selection, mark);
     targets.push_back({*range, std::move(text), selection});
   }
@@ -396,7 +397,7 @@ void detail::MarkdownDocumentEditSession::ApplySplice(std::size_t first, std::si
     if (index != updated.size()) throw std::invalid_argument("Markdown document edit would introduce an extra block");
   };
   if (Source().substr(edit.start_byte, edit.removed_bytes) == edit.inserted_text) validate(original);
-  else (void)parser_.ApplyEdit(edit, validate);
+  else parser_.ApplyEdit(edit, validate);
   blocks_ = std::move(locations);
 }
 
@@ -525,11 +526,11 @@ void MarkdownBlockEditSession::UpdateEdit(const TextEditingValue& value) {
     options.source_ranges = false;
     auto expected = layout_document_.Root();
     ReplaceNestedContent(expected, path_, value.text, options);
-    (void)parser_.ApplyEdit(edit, [&](const MarkdownDocument& next) {
+    parser_.ApplyEdit(edit, [&](const MarkdownDocument& next) {
       if (next.Root() != expected) throw std::invalid_argument("Markdown edit would change surrounding structure");
     });
   } else {
-    (void)parser_.ApplyEdit(edit);
+    parser_.ApplyEdit(edit);
   }
   range_.end_byte = end;
   value_ = std::move(owned);

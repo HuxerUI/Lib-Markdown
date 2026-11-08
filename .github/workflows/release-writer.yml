@@ -27,14 +27,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: FarnaHerry/HuxerUI
-          ref: e119529d4fe118b0b4df4a0a306df6819814d7a0
+          ref: 554d9a540b40fa5a7b51125218a80166c86d8679
           path: .cache/HuxerUI
       - name: Add attributed TextField support
         shell: pwsh
         run: |
-          git -C .cache/HuxerUI fetch --no-tags https://github.com/HuxerUI/HuxerUI.git e29c3c2573dcd7db201e7523ff59803529875d52
+          git -C .cache/HuxerUI fetch --no-tags https://github.com/HuxerUI/HuxerUI.git 511cd16db7d7a621876ad942b5c3161ba0392c49
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git -C .cache/HuxerUI cherry-pick --no-commit e29c3c2573dcd7db201e7523ff59803529875d52
+          git -C .cache/HuxerUI cherry-pick --no-commit 511cd16db7d7a621876ad942b5c3161ba0392c49
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -82,12 +82,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: FarnaHerry/HuxerUI
-          ref: e119529d4fe118b0b4df4a0a306df6819814d7a0
+          ref: 554d9a540b40fa5a7b51125218a80166c86d8679
           path: .cache/HuxerUI
       - name: Add attributed TextField support
         run: |
-          git -C .cache/HuxerUI fetch --no-tags https://github.com/HuxerUI/HuxerUI.git e29c3c2573dcd7db201e7523ff59803529875d52
-          git -C .cache/HuxerUI cherry-pick --no-commit e29c3c2573dcd7db201e7523ff59803529875d52
+          git -C .cache/HuxerUI fetch --no-tags https://github.com/HuxerUI/HuxerUI.git 511cd16db7d7a621876ad942b5c3161ba0392c49
+          git -C .cache/HuxerUI cherry-pick --no-commit 511cd16db7d7a621876ad942b5c3161ba0392c49
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

@@ -1,9 +1,14 @@
 # 块级原位编辑
 
-`MarkdownEditor` 是库组件，Writer 是它的验收 demo。默认对支持的段落、标题和表格单元格直接编辑显示文字，
-保留标题大小、粗体、斜体、下划线、删除线、高亮、插入、行内代码和链接样式。
-编辑时不显示 Markdown 定界符，不在下方重复显示同一段；文字、命中测试、光标、选区和输入法
-共用 HuxerUI 的同一份 attributed paragraph。
+`MarkdownEditor` 是源码权威的库组件，Writer 是它的验收 demo。默认 `rich_text=true` 时，
+公共组件使用一个文档级 `EditSession` 管理支持文字的选区、输入、IME、格式和撤销重做；
+标题、正文、嵌套列表/引用/提示块/脚注正文及显式表格单元格共享同一输入会话。
+Markdown 源码仍是持久表示，成功事务发布新的 AST、源码及全篇源码坐标。
+
+跨段替换、Enter 拆段、Backspace 合段和格式命令共用事务历史。`Changed` 将显示选区及
+composition 映射为全篇源码 UTF-16 坐标；已接受编辑使用精确序列化映射，未规范化拼写或
+不可编辑块使用保守边界映射。外部源码替换通过一次 Import 进入历史，并重挂输入视图。
+公共组件在挂载期间保留历史；Writer 为每个标签外部保留会话，因此切换标签后仍可撤销重做。
 
 ```cpp
 auto value = UseState(TextEditingValue::FromText("# Hello\n\nA **bold** paragraph."));
@@ -18,17 +23,21 @@ return MarkdownEditor(value, {
 });
 ```
 
-需要提供 `TextField::TextStyles` 的 HuxerUI；当前验证版本与构建方式见根 README。
-组件拥有虚拟滚动，需要有界高度，不要再包垂直 ScrollView。`markdown_options` 复用已有样式。
-编辑视图不提供静态正文的跨块选择，`selectable` 不生效。`virtualization` 与 VirtualizedMarkdown 一致。
-编辑块中的链接用于定位光标，修改的是链接标签，目标保留；只读结构中的链接仍可绑定 MarkdownEvents。
+需要提供 `TextField::TextStyles` 和 `TextParagraphLayout` 的 HuxerUI；当前验证版本与构建方式见根 README。
+组件拥有虚拟滚动，需要有界高度，不要再包垂直 ScrollView。`markdown_options` 复用已有样式、
+renderer 和链接策略，`virtualization` 支持外部 ScrollController、估高与缓存距离。
+编辑选区由文档会话提供，`markdown_options.selectable` 不另外启用静态 SelectionArea。
+编辑文字中的链接用于定位光标；只读结构中的链接仍可绑定 MarkdownEvents。
 
-## 两种块内编辑方式
+## 块内与源码回退
 
-默认 `rich_text=true` 时，具有源码区间且行内结构受支持的段落、标题和单元格使用富文本直编。
-当前支持 Text、Strong、Emphasis、Underline、Strikethrough、Highlight、Insertion、Code、Link 和 WikiLink 的嵌套。
-列表项、引用、提示块和脚注定义中的正文复用同一个编辑器。列表标记、任务标记、引用容器和表格对齐随原结构保留。
-显式空单元格也可以点击输入。表格使用 Tab 切换焦点，Enter 完成当前格。
+空文档、无法建立文档投影的结构，以及 `rich_text=false` 的显式调用使用既有块内路径；
+Writer 的“单块编辑”也复用这条内部路径。它仍支持段落、标题、列表项、引用和单元格的
+原位文字编辑，并保留粗体、斜体、下划线、删除线、高亮、插入、行内代码和链接样式。
+
+块内路径支持 Text、Strong、Emphasis、Underline、Strikethrough、Highlight、Insertion、Code、Link 和 WikiLink 的嵌套。
+列表标记、任务标记、引用容器和表格对齐随原结构保留。显式空单元格也可以点击输入。
+表格使用 Tab 切换焦点，Enter 完成当前格。
 
 图片、公式、脚注引用或剧透可走对应块的源码输入。代码、含硬换行的嵌套段落、带合成单元格的表格可打开经验证的外层块源码。
 当源码区间因上下文无法验证时，可用 Writer 的「编辑源码」修改。
@@ -36,7 +45,7 @@ return MarkdownEditor(value, {
 `live_preview` 控制源码输入的下方预览。富文本直编本身显示排版。片段预览使用局部引用上下文，完成编辑后恢复全篇上下文。
 
 点击或 Tab 可聚焦编辑；点击离开或 Ctrl+Enter 完成。实时输入不等待停下输入。
-组合输入未结束时 Ctrl+Enter 不结束块。活动块的布局身份保持稳定，滚动离屏后原生输入会话结束，
+组合输入未结束时 Ctrl+Enter 不结束块。活动块的布局身份保持稳定，滚动离屏后输入会话结束，
 已接受的内容保留；重新进入该块会建立新会话。空文档暂时提供完整源码输入及预览，失焦后按块显示。
 
 ## 富文本模型与源码回写
@@ -60,13 +69,14 @@ return MarkdownEditor(value, {
 输入验证、大小限制或无法序列化的操作发出 Error，保留上次有效内容；必要时结束并重建输入客户端，
 避免显示未被文档接受的文本。此时可再次点击继续编辑。
 
-富文本标题、嵌套正文和行内代码中的结构换行使用源码模式。
-普通段落的单个换行可序列化为硬换行；新增块和结构化 Enter/Backspace 尚待独立事务模型。
+统一文档路径支持标题/正文的 Enter 拆段与 Backspace 合段，并把结构变化纳入同一历史。
+复杂嵌套结构调整和行内代码换行仍使用块内或全文源码模式。普通段落的单个换行可序列化为硬换行。
 富文本中输入 Markdown 标记当前按字面字符处理，不自动执行 Markdown 快捷转换。
 
-原生 TextField 管理当前实例的文本撤销。富文本模型另保留最多 32 个、总量 2 MiB 的最近语义快照，
-支持原生撤销回到这些显示文字时恢复格式。该缓存不是跨块或跨模式的统一历史。
-切块、模式切换、离屏重挂载及复杂格式事务的统一撤销重做仍待实现。
+块内回退路径的 TextField 管理当前实例的文本撤销，并保留最多 32 个、总量 2 MiB 的
+最近语义快照。统一文档路径不使用这套局部缓存：文档 `EditSession` 保存跨段事务、
+选区、IME 提交及 Undo/Redo；Writer 的外部导入也合为一个可撤销事务。
+不同模式各自的输入历史不承诺互相转换，文档会话的 Import 历史会保留。
 
 解析、校验、源码拷贝和当前块的显示模型更新仍有 O(N) 工作；虚拟化只减少挂载视图数量。
 此版本不承诺长单段落的低延迟，也没有文件保存。

@@ -75,7 +75,7 @@ private:
 /// reconstructed from the AST. A root replacement can create any Markdown
 /// structure. Nested edits address single-line content and preserve the rest of
 /// the tree. LayoutDocument/LayoutSource stay frozen until EndEdit so the active
-/// native TextField can retain its identity, selection and IME session.
+/// TextField can retain its identity, selection and IME session.
 class MarkdownBlockEditSession final {
 public:
   explicit MarkdownBlockEditSession(std::string_view source = {}, ParseOptions options = {});

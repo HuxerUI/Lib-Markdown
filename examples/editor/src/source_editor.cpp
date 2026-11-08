@@ -1,4 +1,5 @@
 #include "source_editor.h"
+#include "../../../src/discard.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -36,9 +37,9 @@ struct SourceEditorModel {
 
 void ValidateValue(const TextEditingValue& value) {
   const huxerui::AttributedText text(value.text);
-  (void)text.TextInRange({0, value.selection.anchor});
-  (void)text.TextInRange({0, value.selection.active});
-  if (value.composition) (void)text.TextInRange(*value.composition);
+  LIB_MARKDOWN_DISCARD(text.TextInRange({0, value.selection.anchor}));
+  LIB_MARKDOWN_DISCARD(text.TextInRange({0, value.selection.active}));
+  if (value.composition) LIB_MARKDOWN_DISCARD(text.TextInRange(*value.composition));
   if (value.selection.affinity != huxerui::TextAffinity::Upstream &&
       value.selection.affinity != huxerui::TextAffinity::Downstream) {
     throw std::invalid_argument("Invalid large source editor selection affinity");
@@ -56,7 +57,7 @@ std::size_t ChunkEnd(const std::string& source, std::size_t begin) {
   const std::size_t next_newline = source.find('\n', target_end);
   if (next_newline != std::string::npos) return next_newline + 1;
 
-  // An unterminated long line still needs bounded native layouts. Never split
+  // An unterminated long line still needs bounded layouts. Never split
   // a UTF-8 sequence when falling back to a byte-oriented boundary.
   std::size_t end = target_end;
   while (end > begin && (static_cast<unsigned char>(source[end]) & 0xC0U) == 0x80U) --end;
@@ -218,14 +219,14 @@ huxerui::View LargeSourceEditor(TextEditingValue value, LargeSourceEditorOptions
     if (!holder.Get()) holder = std::make_shared<SourceEditorModel>();
     const auto model = holder.Get();
     auto revision = UseState(std::uint64_t{0});
-    (void)revision.Get();
+    LIB_MARKDOWN_DISCARD(revision.Get());
 
     if (model->chunks.empty() || model->value.text != value.text) {
       ValidateValue(value);
       Rebuild(*model, value);
     } else if (model->value != value) {
       // Text unchanged: this is an external selection/composition update, not
-      // a reason to replace chunk identities or native text layouts.
+      // a reason to replace chunk identities or text layouts.
       ValidateValue(value);
       model->value = value;
       model->active_id = model->chunks[ActiveChunkIndex(*model)].id;
@@ -236,14 +237,14 @@ huxerui::View LargeSourceEditor(TextEditingValue value, LargeSourceEditorOptions
       const auto& chunk = model->chunks[index];
       const std::uint64_t id = chunk.id;
       return Scope([model, index, id, revision, changed]() -> View {
-        (void)revision.Get();
+        LIB_MARKDOWN_DISCARD(revision.Get());
         return TextField(ChunkValue(*model, index, id == model->active_id))
             .Variant(TextFieldVariant::Standard)
             .LineLimits(TextFieldLineLimits::MultiLine(1))
             .VerticalAlign(TextVerticalAlign::Top)
             .OnChanged([model, id, revision, changed](const TextEditingValue& next) mutable {
               if (!ApplyLocalChange(*model, id, next)) return;
-              revision = revision.Get() + 1;
+              ++revision;
               if (changed) changed(model->value);
             })
             .Key("writer-source-chunk-" + std::to_string(id));

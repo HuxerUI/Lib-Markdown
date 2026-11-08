@@ -1,6 +1,7 @@
 #include <huxerui/huxerui.h>
 #include <huxerui/markdown.h>
 #include <huxerui/testing/ui_test.h>
+#include "../src/discard.h"
 #include "test.h"
 #include <cmath>
 #include <limits>
@@ -22,8 +23,8 @@ View VirtualApp() {
   current = UseState(initial);
   dark = UseState(false);
   clipboard = UseApplication().Clipboard();
-  return MaterialTheme(dark.Get() ? MaterialDarkThemeSpec() : MaterialLightThemeSpec(),
-      VirtualizedMarkdown(current.Get(), {
+  return MaterialTheme(dark ? MaterialDarkThemeSpec() : MaterialLightThemeSpec(),
+      VirtualizedMarkdown(current, {
         .code_block_renderer = [](const MarkdownNode& node) -> View {
           ++rendered;
           if (node.text == "code 0\n") first_code = &node;
@@ -35,9 +36,9 @@ View VirtualApp() {
 }
 
 int main() { return Run([] {
-  Throws<std::invalid_argument>([] { (void)VirtualizedMarkdown("x", {}, {.estimated_block_extent = 0}); });
-  Throws<std::invalid_argument>([] { (void)VirtualizedMarkdown("x", {}, {.cache_extent = -1}); });
-  Throws<std::invalid_argument>([] { (void)VirtualizedMarkdown("x", {}, {.cache_extent = std::numeric_limits<float>::infinity()}); });
+  Throws<std::invalid_argument>([] { LIB_MARKDOWN_DISCARD(VirtualizedMarkdown("x", {}, {.estimated_block_extent = 0})); });
+  Throws<std::invalid_argument>([] { LIB_MARKDOWN_DISCARD(VirtualizedMarkdown("x", {}, {.cache_extent = -1})); });
+  Throws<std::invalid_argument>([] { LIB_MARKDOWN_DISCARD(VirtualizedMarkdown("x", {}, {.cache_extent = std::numeric_limits<float>::infinity()})); });
   std::string source, expected;
   for (int i = 0; i < 300; ++i) {
     const auto number = std::to_string(i);

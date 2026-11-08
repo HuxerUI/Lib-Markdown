@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.23 (2026-11-08)
+
+- Move the document edit session, cross-block selection, IME transactions and undo/redo
+  from the Writer experiment into the public `MarkdownEditor` implementation without
+  changing its public signature. Keep block/source fallback for empty or unsupported projections.
+- Share the same editor model, Markdown backing, source-coordinate mapping, renderers and
+  virtualization between the public component and Writer. External source replacement imports
+  one undoable edit; Writer retains independent undo/redo history for every tab.
+- Review HuxerUI PR #153 and PR #154 as sufficient for the editor requirements; native CI
+  temporarily combines their reviewed commits while upstream review and merge remain pending.
+- Add public editor coverage for source selection/composition mapping, Enter/undo, custom code
+  renderers, external scroll control and external replacement, plus Writer per-tab history tests.
+- Align with current HuxerUI conventions: remove command-only `nodiscard` annotations, simplify
+  `State` reads, clarify platform terminology, and centralize explicit result discarding with a
+  small library-private helper while preserving validation and subscription behavior.
+
 ## 0.2.2 (2026-11-06)
 
 - Replace Writer's fixed tab close button with an in-tab control shown on hover,

@@ -1,4 +1,4 @@
-#include "editor.h"
+#include "rich_text_editor.h"
 
 #include <algorithm>
 #include <array>
@@ -11,6 +11,8 @@
 #include <utility>
 
 #include <huxerui/huxerui.h>
+
+#include "discard.h"
 
 namespace huxerui::rich_text {
 namespace {
@@ -98,6 +100,8 @@ public:
 
   void SetItemLookup(std::function<std::size_t(std::size_t)> lookup) { item_for_paragraph_ = std::move(lookup); }
 
+  void SetScrollController(ScrollController scroll) { scroll_ = std::move(scroll); }
+
   const auto& Current() const { return edit_->Current(); }
   auto Composition() const { return edit_->Composition(); }
   bool Focused() const noexcept { return session_ != 0; }
@@ -164,8 +168,8 @@ public:
     start = std::min(start, document.Length());
     auto end = start + std::min(length, document.Length() - start);
     // Platform requests may end inside a supplementary scalar.
-    try { static_cast<void>(document.Locate(start)); } catch (const std::invalid_argument&) { --start; }
-    try { static_cast<void>(document.Locate(end)); } catch (const std::invalid_argument&) { ++end; }
+    try { LIB_MARKDOWN_DISCARD(document.Locate(start)); } catch (const std::invalid_argument&) { --start; }
+    try { LIB_MARKDOWN_DISCARD(document.Locate(end)); } catch (const std::invalid_argument&) { ++end; }
     return {
       TextInputResultCode::Ok, id, start, document.Length(), document.TextInRange({start, end}),
       Current().selection, Composition(),
@@ -176,7 +180,7 @@ public:
     if (!Focused() || session_ != id) return QueryFailure<TextInputGeometry>(id, TextInputResultCode::SessionMismatch);
     try {
       if (!range.IsValid()) return QueryFailure<TextInputGeometry>(id);
-      static_cast<void>(Current().document.Locate(range.start));
+      LIB_MARKDOWN_DISCARD(Current().document.Locate(range.start));
       const auto affinity = range.end == Current().selection.active ? Current().selection.affinity
                                                                      : TextAffinity::Downstream;
       if (const auto caret = Caret({range.end, affinity})) {
@@ -355,6 +359,12 @@ private:
     } catch (const std::length_error& error) {
       if (rejected_) rejected_(error.what());
       return false;
+    } catch (const std::out_of_range& error) {
+      if (rejected_) rejected_(error.what());
+      return false;
+    } catch (const std::runtime_error& error) {
+      if (rejected_) rejected_(error.what());
+      return false;
     }
     const bool document_changed = before.document != Current().document;
     const bool composition_changed = composition != Composition();
@@ -364,11 +374,12 @@ private:
       reveal_ |= reveal;
       Refresh();
     }
-    if ((document_changed || composition_changed) && changed_) changed_(Current().document, Composition());
+    if ((document_changed || before.selection != Current().selection || composition_changed) && changed_)
+      changed_(Current().document, Current().selection, Composition());
     return true;
   }
 
-  void Refresh() { view_revision_ = view_revision_.Get() + 1; }
+  void Refresh() { ++view_revision_; }
 
   void Move(TextOffset offset, TextAffinity affinity, bool extend) {
     Change([&] { edit_->SetSelection({extend ? Current().selection.anchor : offset, offset, affinity}); }, true);
@@ -455,7 +466,7 @@ private:
   std::shared_ptr<EditSession> edit_;
   huxerui::State<std::uint64_t> view_revision_;
   ScrollController scroll_;
-  std::function<void(const Document&, std::optional<TextRange>)> changed_;
+  std::function<void(const Document&, TextSelection, std::optional<TextRange>)> changed_;
   std::function<void(std::string_view)> rejected_;
   std::function<std::size_t(std::size_t)> item_for_paragraph_;
   std::map<TextBlockId, RowGeometry*> rows_;
@@ -613,9 +624,11 @@ View MakeEditor(std::function<std::shared_ptr<EditSession>()> initialize, detail
   return Scope([initialize = std::move(initialize), options = std::move(options)]() -> View {
     auto revision = UseState(std::uint64_t{0});
     const auto owner = UseState(std::make_shared<std::shared_ptr<Editor>>()).Get();
-    const auto scroll = UseScrollController();
+    const auto retained_scroll = UseScrollController();
+    const auto scroll = options.scroll_controller.value_or(retained_scroll);
     if (!*owner) *owner = std::make_shared<Editor>(initialize(), revision, scroll);
     const auto editor = *owner;
+    editor->SetScrollController(scroll);
     editor->SetObservers(options);
     if (options.format_actions) {
       const std::weak_ptr<Editor> weak = editor;
@@ -656,7 +669,8 @@ View MakeEditor(std::function<std::shared_ptr<EditSession>()> initialize, detail
         const float gap = index + 1 < count ? spacing : 0.0F;
         return std::move(row).With(Padding(EdgeInsets{0.0F, 0.0F, gap, 0.0F}));
       }).Key(layout.render_item ? layout.item_ids[index] : document.Paragraphs()[index].id);
-    }).EstimatedItemExtent(line_height + spacing).Controller(scroll)
+    }).EstimatedItemExtent(options.estimated_item_extent > 0.0F ? options.estimated_item_extent : line_height + spacing)
+      .CacheExtent(options.cache_extent).Controller(scroll)
       .With(Focusable{true}, PointerCursor(PointerCursorKind::Text), DocumentSurface{editor, caret}, ScrollBar(),
             Grow{}).Key("rich-text-editor");
   });

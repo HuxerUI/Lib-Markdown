@@ -53,14 +53,14 @@ int main() { return Run([] {
       dark = UseState(false);
       custom = UseState(false);
       mounted = UseState(true);
-      const int binding = version.Get();
+      const int binding = version;
       MarkdownOptions options;
-      if (custom.Get()) options.admonition_renderer = [](const MarkdownNode& node) -> View {
+      if (custom) options.admonition_renderer = [](const MarkdownNode& node) -> View {
         CHECK(node.admonition_kind == AdmonitionKind::Warning);
         return Text("custom: " + PlainText(node));
       };
       View content = Text("unmounted");
-      if (mounted.Get()) {
+      if (mounted) {
         content = virtualized ? VirtualizedMarkdown(document, options) : Markdown(document, options);
         content = std::move(content)
             .On<MarkdownEvents::LinkActivated>([&](const MarkdownLinkActivation&) { ++url_calls; })
@@ -72,7 +72,7 @@ int main() { return Run([] {
             });
         if (!virtualized) content = ScrollView(std::move(content));
       }
-      return MaterialTheme(dark.Get() ? MaterialDarkThemeSpec() : MaterialLightThemeSpec(),
+      return MaterialTheme(dark ? MaterialDarkThemeSpec() : MaterialLightThemeSpec(),
           Column{std::move(content).With(Grow{})}.With(CrossAlign(CrossAxisAlignment::Stretch)));
     };
     Application app(FeatureRoot, {.show_debug_overlay = false});

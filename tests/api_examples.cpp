@@ -1,6 +1,7 @@
 // Compile the public examples as part of the full library build.
 #include <huxerui/huxerui.h>
 #include <huxerui/markdown.h>
+#include "../src/discard.h"
 
 namespace markdown_examples {
 using namespace huxerui;
@@ -8,9 +9,7 @@ using namespace huxerui::markdown;
 
 View Article() {
   return ScrollView(Markdown("# Hello\n\n**Native** Markdown.")
-      .On<MarkdownEvents::LinkActivated>([](const MarkdownLinkActivation& event) {
-        (void)event.destination;
-      }));
+      .On<MarkdownEvents::LinkActivated>([](const MarkdownLinkActivation&) {}));
 }
 
 View CustomParsing(std::string_view source) {
@@ -20,10 +19,10 @@ View CustomParsing(std::string_view source) {
 
 MarkdownDocument IncrementalParsing() {
   MarkdownParseSession session;
-  (void)session.Update("# Hello\n\nFirst paragraph.\n\nSecond paragraph.\n");
+  session.Update("# Hello\n\nFirst paragraph.\n\nSecond paragraph.\n");
   auto document = session.ApplyEdit({.start_byte = session.Source().size(),
                                     .inserted_text = "\nAppended paragraph.\n"});
-  (void)session.LastParseStats();
+  LIB_MARKDOWN_DISCARD(session.LastParseStats());
   return document;
 }
 
@@ -50,8 +49,8 @@ View CustomImage(MarkdownDocument document) {
 
 MarkdownDocument Streamed() {
   MarkdownStream stream;
-  (void)stream.Append("# Hello\n\n\xF0\x9F");
-  (void)stream.Append("\x98\x80\n");
+  stream.Append("# Hello\n\n\xF0\x9F");
+  stream.Append("\x98\x80\n");
   return stream.Finish();
 }
 
@@ -68,8 +67,8 @@ View ExtendedArticle(std::string_view source) {
   return Markdown(document, {.admonition_renderer = [](const MarkdownNode& node) -> View {
     return Text(PlainText(node));
   }})
-      .On<MarkdownEvents::WikiLinkActivated>([](const MarkdownWikiLinkActivation& event) { (void)event.target; })
-      .On<MarkdownEvents::FootnoteActivated>([](const MarkdownFootnoteActivation& event) { (void)event.number; });
+      .On<MarkdownEvents::WikiLinkActivated>([](const MarkdownWikiLinkActivation&) {})
+      .On<MarkdownEvents::FootnoteActivated>([](const MarkdownFootnoteActivation&) {});
 }
 
 View MathSource(std::string_view source) {

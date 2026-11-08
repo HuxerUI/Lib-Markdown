@@ -44,8 +44,9 @@ public:
     return ids;
   }
 
-  View RenderItem(std::size_t block, const MarkdownStyle& style, const editor::RenderParagraph& render) const {
-    return RenderEditableBlock(session_.Block(block), style,
+  View RenderItem(std::size_t block, const MarkdownOptions& options, const MarkdownStyle& style,
+                  EventEmitter events, const editor::RenderParagraph& render) const {
+    return RenderEditableBlock(session_.Block(block), options, style, std::move(events),
         [&](const MarkdownNode& node, TextStyle base, TextAlign align) -> std::optional<View> {
           auto index = block_starts_[block];
           if (session_.SyntaxIndex(block)) {
@@ -54,7 +55,8 @@ public:
             index = found->second;
           }
           const MarkdownRichText rich(node, options_);
-          auto displayed = AttributedText::FromRanges(rich.Value().text, BuildEditableStyles(rich, base, style, {}));
+          auto displayed = AttributedText::FromRanges(
+              rich.Value().text, BuildEditableStyles(rich, base, style, options.link_policy));
           return render(index, std::move(displayed), std::move(base), align);
         });
   }
@@ -116,7 +118,47 @@ public:
     return editor::Document({paragraphs.begin(), paragraphs.end()}, std::move(next));
   }
 
+  TextEditingValue Value(const editor::Document& document, TextSelection selection,
+                         std::optional<TextRange> composition) const {
+    auto result = TextEditingValue::FromText(std::string(Source()));
+    const auto map = [&](TextOffset offset, TextAffinity affinity) {
+      const auto position = document.Locate(offset);
+      const auto byte = SourceByte(position.index, position.offset, affinity);
+      return AttributedText(std::string(Source().substr(0, byte))).Length();
+    };
+    result.selection = {map(selection.anchor, selection.affinity),
+                        map(selection.active, selection.affinity), selection.affinity};
+    if (composition) {
+      const auto start = map(composition->start, TextAffinity::Downstream);
+      const auto end = composition->IsCollapsed() ? start : map(composition->end, TextAffinity::Upstream);
+      result.composition = TextRange{start, std::max(start, end)};
+    }
+    return result;
+  }
+
 private:
+  std::size_t SourceByte(std::size_t index, TextOffset offset, TextAffinity affinity) const {
+    const auto& leaf = leaves_.at(index);
+    const auto range = leaf.path.empty() ? session_.SourceRange(leaf.block)
+                                         : session_.Document().SourceRange(leaf.path);
+    if (!range) return 0;
+    const auto plain_length = AttributedText(PlainText(*leaf.node)).Length();
+    const auto conservative = [&] {
+      return offset <= 0 ? range->start_byte : offset >= plain_length ? range->end_byte : range->start_byte;
+    };
+    if (!MarkdownRichText::Supports(*leaf.node)) return conservative();
+    auto rich = leaf.path.size() > 1 ? RichProjection(*leaf.node, true, options_)
+                                     : MarkdownRichText(*leaf.node, options_);
+    auto displayed = rich.Value();
+    displayed.selection = {offset, offset, affinity};
+    rich.Update(displayed);
+    const auto mapped = rich.SourceValue();
+    if (mapped.text != Source().substr(range->start_byte, range->end_byte - range->start_byte))
+      return conservative();
+    return range->start_byte +
+        AttributedText(mapped.text).TextInRange({0, mapped.selection.active}).size();
+  }
+
   struct Leaf {
     std::size_t block;
     std::vector<std::size_t> path;
@@ -188,13 +230,49 @@ const MarkdownDocument& EditableMarkdownSyntax(const rich_text::detail::Document
   return Backing(document).Syntax();
 }
 
+TextEditingValue EditableMarkdownValue(const rich_text::detail::Document& document,
+                                       TextSelection selection, std::optional<TextRange> composition) {
+  return Backing(document).Value(document, selection, composition);
+}
+
 rich_text::detail::EditorLayout EditableMarkdownLayout(const rich_text::detail::Document& document,
-                                                       MarkdownStyle style) {
+                                                       MarkdownOptions options, MarkdownStyle style,
+                                                       EventEmitter events) {
+  options.selectable = false;
   return {Backing(document).ItemIds(document.Paragraphs()),
           [document](std::size_t index) { return Backing(document).ItemForParagraph(index); },
-          [document, style = std::move(style)](std::size_t block, const rich_text::detail::RenderParagraph& render) {
-            return Backing(document).RenderItem(block, style, render);
+          [document, options = std::move(options), style = std::move(style), events = std::move(events)](
+              std::size_t block, const rich_text::detail::RenderParagraph& render) mutable {
+            return Backing(document).RenderItem(block, options, style, events, render);
           }};
+}
+
+[[huxerui::composable]]
+View MarkdownDocumentEditor(std::shared_ptr<rich_text::detail::EditSession> edit,
+                            MarkdownEditorOptions options,
+                            std::function<void(const TextEditingValue&)> changed,
+                            std::function<void(std::string_view)> rejected,
+                            std::shared_ptr<rich_text::detail::InlineFormatActions> format_actions) {
+  if (!edit) throw std::invalid_argument("Markdown document editor requires a session");
+  const auto events = UseEvents();
+  const auto style = options.markdown_options.style ? *options.markdown_options.style
+                                                    : MarkdownStyle::FromTheme(UseTheme());
+  return rich_text::detail::RichTextEditor(edit, {
+      .base_style = style.body,
+      .paragraph_spacing = style.block_spacing,
+      .estimated_item_extent = options.virtualization.estimated_block_extent,
+      .cache_extent = options.virtualization.cache_extent,
+      .scroll_controller = options.virtualization.scroll_controller,
+      .layout = [options = options.markdown_options, style, events](const rich_text::detail::Document& document) mutable {
+        return EditableMarkdownLayout(document, options, style, events);
+      },
+      .changed = [changed = std::move(changed)](const rich_text::detail::Document& document,
+                   TextSelection selection, std::optional<TextRange> composition) mutable {
+        if (changed) changed(EditableMarkdownValue(document, selection, composition));
+      },
+      .rejected = std::move(rejected),
+      .format_actions = std::move(format_actions),
+  });
 }
 
 } // namespace huxerui::markdown::detail

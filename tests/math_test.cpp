@@ -64,7 +64,7 @@ int main() { return Run([] {
     for (const auto& seed : seeds) {
       MarkdownParseSession session(options);
       auto text = seed;
-      (void)session.Update(text);
+      session.Update(text);
       for (int i = 0; i < 100; ++i) {
         std::vector<std::size_t> positions;
         for (std::size_t j = 0; j < text.size(); ++j)
@@ -79,18 +79,18 @@ int main() { return Run([] {
       }
       MarkdownStream stream(options);
       for (const char byte : seed) {
-        (void)stream.Append(std::string_view(&byte, 1));
+        stream.Append(std::string_view(&byte, 1));
         CHECK(stream.Document().Root() == ParseMarkdown(stream.Source(), options).Root());
       }
       CHECK(stream.Finish().Root() == ParseMarkdown(seed, options).Root());
     }
   }
   MarkdownParseSession incremental({.math = true, .preserve_blank_lines = true});
-  (void)incremental.Update(seeds[0]);
+  incremental.Update(seeds[0]);
   const auto changed = incremental.Append("\n\n$x+1$\n");
   CHECK(incremental.LastParseStats().mode == MarkdownParseMode::Incremental);
   CHECK(changed.Root() == ParseMarkdown(incremental.Source(), {.math = true, .preserve_blank_lines = true}).Root());
   MarkdownStream incomplete({.math = true});
-  (void)incomplete.Append("$not closed");
+  incomplete.Append("$not closed");
   CHECK(incomplete.Finish().PlainText() == "$not closed"); // Finish does not invent a closing delimiter.
 }); }

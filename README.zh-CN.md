@@ -137,7 +137,8 @@ renderer 在 UI 组合时执行，节点引用仅在回调期间借用，延迟�
 `std::length_error`；无效 UTF-8 会抛出 `std::invalid_argument`。
 
 任务复选框只读；表格使用固定列宽并支持横向滚动；默认代码块为可换行的等宽文本。
-组件本身不包含完整可视化编辑器、数学排版或 HTML 执行。增量解析由独立会话提供。
+`MarkdownEditor` 提供源码权威的统一富文本事务，复杂结构可回退到块内或全文源码编辑。
+数学排版、图表和 HTML 执行不在当前范围内。增量解析由独立会话提供。
 
 ## 交互 Demo
 
@@ -158,8 +159,10 @@ Windows/Visual Studio 下运行 `build-preview/Release/markdown_preview.exe`，
 并保留旁边的 `markdown_preview.resources` 目录。CI 会提供 Windows demo artifact。
 
 第二个 [Markdown Writer](examples/editor/README.md) 位于 `examples/editor`，是类 Typora
-体验的实验版。默认使用库的 `MarkdownEditor`，可直接编辑排版后的段落、标题、列表项、引用和表格单元格。
-文字、光标和输入法共用原生富文本布局。代码块和复杂内容使用原位源码输入，结构修改使用全文源码模式。
+体验的实验版。公共 `MarkdownEditor` 对支持的富文本使用同一个源码权威的文档事务，
+支持跨段选区、IME、Enter/Backspace、Undo/Redo 和全篇源码选区回报。列表、引用及显式
+表格单元格共享输入会话；复杂结构仍使用经验证的块内或全文源码编辑。Writer 为每个标签
+保留独立历史。
 具体支持范围和后续任务见[块级编辑接口](docs/block-editing.md)和[后续记录](docs/editor-follow-up.md)。
 
 ```powershell
@@ -172,8 +175,11 @@ cmake --build build-editor --config Release --parallel
 
 ## 构建
 
-需要 CMake 3.20+、C99/C++20 编译器和提供 `TextField::TextStyles` 的 HuxerUI SDK 或源码。
-已验证版本为 `e29c3c2573dcd7db201e7523ff59803529875d52`，位于 SDK 的 `feat/text-field-attributed-styles` 分支；CI 固定该提交。
+需要 CMake 3.20+、C99/C++20 编译器，以及同时提供 `TextField::TextStyles` 和
+`TextMeasurer::LayoutText`/`TextParagraphLayout` 的 HuxerUI SDK 或源码。
+在这两项能力进入官方主线前，native CI 组合使用
+[PR #153](https://github.com/HuxerUI/HuxerUI/pull/153)（`511cd16`）和
+[PR #154](https://github.com/HuxerUI/HuxerUI/pull/154)（`554d9a5`）。仅构建解析器不需要 HuxerUI。
 
 ```sh
 cmake -S . -B build -DHUXERUI_HOME=/path/to/HuxerUI \

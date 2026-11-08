@@ -117,18 +117,18 @@ int main() { return Run([] {
   CHECK(references.LastParseStats().mode == MarkdownParseMode::Full);
 
   MarkdownParseSession limits({.max_input_bytes = 24, .max_nesting = 3});
-  (void)limits.Update("# A\n\n中文😀\n");
+  limits.Update("# A\n\n中文😀\n");
   const auto before = limits.Document();
   const auto stats = limits.LastParseStats();
   const auto source = std::string(limits.Source());
-  Throws<std::out_of_range>([&] { (void)limits.ApplyEdit({999, 0, ""}); });
-  Throws<std::out_of_range>([&] { (void)limits.ApplyEdit({0, 999, ""}); });
-  Throws<std::invalid_argument>([&] { (void)limits.ApplyEdit({7, 0, "x"}); });
-  Throws<std::invalid_argument>([&] { (void)limits.ApplyEdit({5, 1, "x"}); });
-  Throws<std::invalid_argument>([&] { (void)limits.ApplyEdit({0, 0, "\xF0\x9F"}); });
-  Throws<std::length_error>([&] { (void)limits.Update(std::string(25, 'a')); });
-  Throws<std::length_error>([&] { (void)limits.ApplyEdit({0, 0, std::string(25, 'a')}); });
-  Throws<std::length_error>([&] { (void)limits.Update("> > > > nested"); });
+  Throws<std::out_of_range>([&] { limits.ApplyEdit({999, 0, ""}); });
+  Throws<std::out_of_range>([&] { limits.ApplyEdit({0, 999, ""}); });
+  Throws<std::invalid_argument>([&] { limits.ApplyEdit({7, 0, "x"}); });
+  Throws<std::invalid_argument>([&] { limits.ApplyEdit({5, 1, "x"}); });
+  Throws<std::invalid_argument>([&] { limits.ApplyEdit({0, 0, "\xF0\x9F"}); });
+  Throws<std::length_error>([&] { limits.Update(std::string(25, 'a')); });
+  Throws<std::length_error>([&] { limits.ApplyEdit({0, 0, std::string(25, 'a')}); });
+  Throws<std::length_error>([&] { limits.Update("> > > > nested"); });
   CHECK(limits.Document() == before);
   CHECK(limits.Source() == source);
   CHECK(limits.LastParseStats() == stats);

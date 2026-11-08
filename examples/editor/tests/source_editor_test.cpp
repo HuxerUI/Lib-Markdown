@@ -30,7 +30,7 @@ std::string MakeSource() {
 View SourceEditorTestApp() {
   auto value = UseState(TextEditingValue::FromText(initial_source));
   source_value = value;
-  return markdown_writer::LargeSourceEditor(value.Get(), {
+  return markdown_writer::LargeSourceEditor(value, {
       .changed = [value](const TextEditingValue& next) mutable {
         source_changes.push_back(next);
         value = next;
@@ -57,7 +57,7 @@ int main() {
     CHECK(original_first.back() == '\n');
     CHECK(original_first.find("\r\n") != std::string::npos);
     CHECK(initial_source.starts_with(original_first));
-    CHECK(source_value.Get().text == initial_source);
+    CHECK(source_value->text == initial_source);
     const auto first_identity = first.One().key;
 
     // Local insertion preserves all original bytes and maps the emitted caret
@@ -68,7 +68,7 @@ int main() {
     first.EnterText("A😀");
     std::string expected = "A😀" + initial_source;
     CHECK(source_changes.size() == changes_before_insert + 1);
-    CHECK(source_value.Get().text == expected);
+    CHECK(source_value->text == expected);
     CHECK(source_changes.back().selection == (TextSelection{3, 3}));
     CHECK(first.One().value == "A😀" + original_first);
     CHECK(first.One().key == first_identity);
@@ -77,7 +77,7 @@ int main() {
     // splitting the retained source into a new set of fields.
     ui.PressKey(Key::Enter);
     expected.insert(5, "\n");
-    CHECK(source_value.Get().text == expected);
+    CHECK(source_value->text == expected);
     CHECK(first.One().value->starts_with("A😀\n"));
     CHECK(first.One().key == first_identity);
 
@@ -110,7 +110,7 @@ int main() {
     CHECK(second.One().key == second_identity);
 
     second.SetSelection({0, 1});
-    CHECK(source_value.Get().text == expected);
+    CHECK(source_value->text == expected);
     CHECK(source_changes.back().selection == (TextSelection{
         second_utf16_offset,
         second_utf16_offset + 1,
@@ -127,7 +127,7 @@ int main() {
     }}}).result_code == TextInputResultCode::Ok);
     ui.Pump();
     expected.insert(second_byte_offset, "拼");
-    CHECK(source_value.Get().text == expected);
+    CHECK(source_value->text == expected);
     CHECK(source_changes.back().selection == (TextSelection{
         second_utf16_offset + 1,
         second_utf16_offset + 1,
@@ -145,7 +145,7 @@ int main() {
     }}}).result_code == TextInputResultCode::Ok);
     ui.Pump();
     expected.replace(second_byte_offset, std::string("拼").size(), "中文");
-    CHECK(source_value.Get().text == expected);
+    CHECK(source_value->text == expected);
     CHECK(source_changes.back().selection == (TextSelection{
         second_utf16_offset + 2,
         second_utf16_offset + 2,
@@ -169,7 +169,7 @@ int main() {
     CHECK(replaced_info.key != second_identity);
     const auto replacement_identity = replaced_info.key;
 
-    // Selection-only external updates retain the replacement's native field.
+    // Selection-only external updates retain the replacement's field.
     replaced.Tap();
     replacement.selection = {5, 2, TextAffinity::Upstream};
     source_value = replacement;

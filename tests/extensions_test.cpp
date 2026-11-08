@@ -95,7 +95,7 @@ int main() { return Run([] {
   for (const auto& seed : seeds) {
     MarkdownParseSession session(options);
     auto text = seed;
-    (void)session.Update(text);
+    session.Update(text);
     for (int i = 0; i < 150; ++i) {
       std::vector<std::size_t> boundaries;
       for (std::size_t byte = 0; byte < text.size(); ++byte)
@@ -110,18 +110,18 @@ int main() { return Run([] {
     }
     MarkdownStream stream(options);
     for (const char byte : seed) {
-      (void)stream.Append(std::string_view(&byte, 1));
+      stream.Append(std::string_view(&byte, 1));
       CHECK(stream.Document().Root() == ParseMarkdown(stream.Source(), options).Root());
     }
     CHECK(stream.Finish().Root() == ParseMarkdown(seed, options).Root());
   }
   MarkdownParseSession incremental(options);
-  (void)incremental.Update(seeds[0]);
+  incremental.Update(seeds[0]);
   const auto updated = incremental.Append("tail\n");
   CHECK(incremental.LastParseStats().mode == MarkdownParseMode::Incremental);
   CHECK(updated.Root() == ParseMarkdown(std::string(incremental.Source()), options).Root());
   MarkdownParseSession global(options);
-  (void)global.Update("ref[^a]\n\n# Later\n\nbody\n");
+  global.Update("ref[^a]\n\n# Later\n\nbody\n");
   const auto resolved = global.Append("\n[^a]: defined at end\n");
   CHECK(global.LastParseStats().mode == MarkdownParseMode::Full);
   CHECK(Nodes(resolved.Root(), NodeKind::FootnoteReference).size() == 1);

@@ -1,4 +1,5 @@
-#include "model.h"
+#include "rich_text_model.h"
+#include "discard.h"
 
 #include <algorithm>
 #include <array>
@@ -23,8 +24,8 @@ Document InitialDocument(std::vector<AttributedText> values) {
 }
 
 void ValidateSelection(const Document& document, TextSelection selection) {
-  static_cast<void>(document.Locate(selection.anchor));
-  static_cast<void>(document.Locate(selection.active));
+  LIB_MARKDOWN_DISCARD(document.Locate(selection.anchor));
+  LIB_MARKDOWN_DISCARD(document.Locate(selection.active));
   if (selection.affinity != TextAffinity::Upstream && selection.affinity != TextAffinity::Downstream) {
     throw std::invalid_argument("Rich text selection affinity is invalid");
   }
@@ -239,7 +240,7 @@ ParagraphPosition Document::Locate(TextOffset offset) const {
   const auto next = std::upper_bound(storage_->starts.begin(), storage_->starts.end(), offset);
   const auto index = static_cast<std::size_t>(next - storage_->starts.begin() - 1);
   const auto local = offset - Start(index);
-  static_cast<void>(Paragraphs()[index].text.TextInRange({local, local}));
+  LIB_MARKDOWN_DISCARD(Paragraphs()[index].text.TextInRange({local, local}));
   return {index, local};
 }
 
@@ -486,8 +487,8 @@ void EditSession::ToggleFormat(InlineFormat format, TextSelection selection) {
 void EditSession::BeginComposition(TextRange target) {
   if (composition_) throw std::logic_error("Rich text composition is already active");
   if (!target.IsValid()) throw std::invalid_argument("Rich text composition range must be ordered");
-  static_cast<void>(current_.document.Locate(target.start));
-  static_cast<void>(current_.document.Locate(target.end));
+  LIB_MARKDOWN_DISCARD(current_.document.Locate(target.start));
+  LIB_MARKDOWN_DISCARD(current_.document.Locate(target.end));
   composition_baseline_ = CompositionBaseline{current_, target};
   composition_ = target;
 }

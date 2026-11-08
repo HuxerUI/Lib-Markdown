@@ -55,8 +55,8 @@ android {
         applicationId = "org.huxerui.markdown.editor"
         minSdk = huxeruiMinSdk
         targetSdk = huxeruiTargetSdk
-        versionCode = 3
-        versionName = "0.2.2"
+        versionCode = 4
+        versionName = "0.2.23"
 
         externalNativeBuild {
             cmake {

@@ -1,5 +1,6 @@
 #include <huxerui/markdown.h>
 #include <huxerui/huxerui.h>
+#include "../src/discard.h"
 #include <algorithm>
 #include <limits>
 #include "inline.h"
@@ -85,21 +86,21 @@ int main() { return Run([] {
   CHECK(image_link.links.size() == 1);
   CHECK(image_link.links[0].destination == "https://outer.example");
 
-  (void)Markdown(MarkdownDocument{});
+  LIB_MARKDOWN_DISCARD(Markdown(MarkdownDocument{}));
   auto invalid = MarkdownStyle{};
   invalid.table_cell_width = 0;
-  Throws<std::invalid_argument>([&] { (void)Markdown("x", {.style = invalid}); });
+  Throws<std::invalid_argument>([&] { LIB_MARKDOWN_DISCARD(Markdown("x", {.style = invalid})); });
   invalid = MarkdownStyle{};
   invalid.heading_sizes[0] = std::numeric_limits<float>::quiet_NaN();
-  Throws<std::invalid_argument>([&] { (void)Markdown("x", {.style = invalid}); });
+  Throws<std::invalid_argument>([&] { LIB_MARKDOWN_DISCARD(Markdown("x", {.style = invalid})); });
 
 #ifdef MARKDOWN_HAS_UI_TESTING
   using namespace huxerui::testing;
   Application app([]() -> View {
     auto swapped = UseState(false);
     return Column{
-      Button("Swap").OnClick([swapped]() mutable { swapped = !swapped.Get(); }),
-      ScrollView(Markdown(swapped.Get() ? "# Updated" :
+      Button("Swap").OnClick([swapped]() mutable { swapped = !swapped; }),
+      ScrollView(Markdown(swapped ? "# Updated" :
           "# Native\n\n[Go](../guide.md)\n\n- **first**\n  - nested\n\n> quote\n\n```cpp\nint n;\n```\n\n| A | B |\n|---|---|\n| long text wraps inside a fixed column | cell |\n\n![alt](image.png)",
           {}).On<MarkdownEvents::LinkActivated>([](const MarkdownLinkActivation& event) { activated = event.destination; })).With(Grow{}),
     }.With(CrossAlign(CrossAxisAlignment::Stretch));

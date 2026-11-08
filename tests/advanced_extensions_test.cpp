@@ -47,7 +47,7 @@ int main() { return Run([] {
       CHECK(doc.Root() == ParseMarkdown(text, options).Root());
     }
     MarkdownStream stream(options);
-    for (const char c : text) (void)stream.Append(std::string_view(&c, 1));
+    for (const char c : text) stream.Append(std::string_view(&c, 1));
     CHECK(stream.Finish().Root() == ParseMarkdown(text, options).Root());
   }
 }); }

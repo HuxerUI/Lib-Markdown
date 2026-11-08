@@ -31,7 +31,7 @@ public:
   [[nodiscard]] const MarkdownNode& Block(std::size_t index) const;
   [[nodiscard]] std::optional<std::size_t> SyntaxIndex(std::size_t index) const;
   [[nodiscard]] std::optional<MarkdownSourceRange> SourceRange(std::size_t index) const;
-  [[nodiscard]] MarkdownBlockPosition Replace(MarkdownBlockPosition first, MarkdownBlockPosition last,
+  MarkdownBlockPosition Replace(MarkdownBlockPosition first, MarkdownBlockPosition last,
                                               std::string_view replacement);
   bool ToggleMark(MarkdownBlockPosition first, MarkdownBlockPosition last, NodeKind mark);
   void ReplaceNested(std::size_t block, std::span<const std::size_t> path, TextRange range,

@@ -4,11 +4,12 @@
 #include <stdexcept>
 
 #include "editing_internal.h"
+#include "discard.h"
 
 namespace huxerui::markdown {
 namespace {
 std::vector<std::string> Scalars(std::string_view text) {
-  (void)AttributedText(std::string(text));
+  AttributedText(std::string(text));
   std::vector<std::string> result;
   for (std::size_t i = 0; i < text.size();) {
     const auto c = static_cast<unsigned char>(text[i]);
@@ -102,7 +103,7 @@ std::vector<MarkdownRichTextRun> MarkdownRichText::Runs() const {
 }
 
 bool MarkdownRichText::SetMark(TextRange range, NodeKind kind, bool enabled) {
-  (void)AttributedText(value_.text).TextInRange(range);
+  LIB_MARKDOWN_DISCARD(AttributedText(value_.text).TextInRange(range));
   bool changed = false;
   TextOffset offset = 0;
   for (auto& character : characters_) {
@@ -265,10 +266,10 @@ TextEditingValue MarkdownRichText::SourceValue() const {
 }
 void MarkdownRichText::Update(const TextEditingValue& value) {
   const AttributedText text(value.text);
-  (void)text.TextInRange({0, value.selection.anchor});
-  (void)text.TextInRange({0, value.selection.active});
+  LIB_MARKDOWN_DISCARD(text.TextInRange({0, value.selection.anchor}));
+  LIB_MARKDOWN_DISCARD(text.TextInRange({0, value.selection.active}));
   if (value.composition)
-    (void)text.TextInRange(*value.composition);
+    LIB_MARKDOWN_DISCARD(text.TextInRange(*value.composition));
   if (value.selection.affinity != TextAffinity::Upstream && value.selection.affinity != TextAffinity::Downstream)
     throw std::invalid_argument("Invalid Markdown rich text affinity");
   auto next = *this;
@@ -316,7 +317,7 @@ void MarkdownRichText::Update(const TextEditingValue& value) {
         if (!target.IsValid())
           return;
         try {
-          (void)AttributedText(value_.text).TextInRange(target);
+          LIB_MARKDOWN_DISCARD(AttributedText(value_.text).TextInRange(target));
         } catch (const std::invalid_argument&) {
           return;
         }
@@ -359,8 +360,8 @@ void MarkdownRichText::Update(const TextEditingValue& value) {
     next.composition_text_.clear();
   }
   if (value.text != value_.text) {
-    (void)next.SourceValue();
-    // Native TextField undo carries display text, not semantic marks. Retain a
+    LIB_MARKDOWN_DISCARD(next.SourceValue());
+    // TextField undo carries display text, not semantic marks. Retain a
     // bounded local cache so revisiting recent text restores its formatting too.
     auto source = SourceValue().text;
     next.history_bytes_ += value_.text.size() + source.size();

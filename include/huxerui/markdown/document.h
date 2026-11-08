@@ -216,13 +216,13 @@ public:
 
   /// Accepts complete UTF-8 source. Equal input preserves snapshot identity and parses
   /// zero bytes. Failure preserves Source(), Document() and LastParseStats().
-  [[nodiscard]] MarkdownDocument Update(std::string_view source);
+  MarkdownDocument Update(std::string_view source);
   /// Applies one edit against the current source. Invalid byte ranges throw out_of_range;
   /// split scalars/invalid UTF-8 throw invalid_argument; size/depth limits throw length_error.
-  [[nodiscard]] MarkdownDocument ApplyEdit(const MarkdownEdit& edit);
+  MarkdownDocument ApplyEdit(const MarkdownEdit& edit);
   /// Appends complete UTF-8 text to the current source, using incremental parsing.
   /// For arbitrary byte chunks (including split scalars), use MarkdownStream.
-  [[nodiscard]] MarkdownDocument Append(std::string_view text);
+  MarkdownDocument Append(std::string_view text);
   /// Borrowed UTF-8 source, invalidated by successful replacement or session destruction.
   [[nodiscard]] std::string_view Source() const noexcept;
   /// Borrowed current snapshot; copy it to retain it across updates/destruction.
@@ -255,10 +255,10 @@ public:
 
   /// Rejects invalid UTF-8 and input limits, including buffered bytes. Empty or purely
   /// incomplete chunks preserve the document/stats. Appending after Finish throws logic_error.
-  [[nodiscard]] MarkdownDocument Append(std::string_view bytes);
+  MarkdownDocument Append(std::string_view bytes);
   /// Marks completion; throws invalid_argument for a truncated scalar without closing
   /// the stream, so its remaining bytes can still arrive. Idempotent after success.
-  [[nodiscard]] MarkdownDocument Finish();
+  MarkdownDocument Finish();
   /// Borrowed committed UTF-8 source, excluding pending bytes. Invalidated on replacement.
   [[nodiscard]] std::string_view Source() const noexcept;
   [[nodiscard]] const MarkdownDocument& Document() const noexcept;

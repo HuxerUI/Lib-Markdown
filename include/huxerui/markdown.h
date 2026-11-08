@@ -147,9 +147,9 @@ struct MarkdownVirtualizationOptions {
 [[nodiscard]] View VirtualizedMarkdown(std::string_view source, MarkdownOptions options = {},
                                      MarkdownVirtualizationOptions virtualization = {});
 
-/// Native block editor. Supported paragraphs/headings edit displayed attributed
-/// text with hidden Markdown markers. Unsupported inline content falls back to
-/// in-place source input; other structures remain rendered/read-only.
+/// Native source-backed Markdown editor. Rich mode shares one document selection,
+/// input session and undo/redo history across supported paragraphs and nested text.
+/// Empty or unsupported projections use the existing empty/source block fallback.
 struct MarkdownEditorOptions {
   ParseOptions parse_options;
   MarkdownOptions markdown_options;
@@ -157,9 +157,8 @@ struct MarkdownEditorOptions {
   /// Show a preview below source fallback/empty-source input. Rich editing renders
   /// directly without a duplicate preview. Fragment previews have local reference scope.
   bool live_preview = true;
-  /// Edit supported inline content directly with its typography and hidden markers.
-  /// Other blocks with a verified source range offer in-place source editing. Edited blocks are serialized
-  /// semantically; source spelling inside that block can change.
+  /// Use one source-backed document transaction for rich editing, including cross-block
+  /// selection and undo/redo. False edits verified blocks as Markdown source instead.
   bool rich_text = true;
 };
 
@@ -171,12 +170,11 @@ struct MarkdownEditorEvents {
   struct Error : Event<void(const std::string&)> {};
 };
 
-/// Owns virtual scrolling and requires bounded height. Click/Tab into an editable
-/// block, list item, quote paragraph or cell. Blur or Ctrl+Enter finishes the edit
-/// after any IME composition.
-/// Uses one attributed native paragraph for painting, hit testing, caret and IME.
-/// Each mounted field owns its text history, with a bounded semantic formatting cache.
-/// An empty document presents one native source field so writing can begin.
+/// Owns virtual scrolling and requires bounded height. Rich mode supports cross-block
+/// selection, editing and undo/redo with one input session. Changed reports
+/// whole-source UTF-16 selection/composition coordinates. External source replacement
+/// imports one undoable edit and remounts the input view without discarding history.
+/// An empty document presents one source field so writing can begin.
 [[nodiscard]] View MarkdownEditor(TextEditingValue value, MarkdownEditorOptions options = {});
 [[nodiscard]] inline View MarkdownEditor(const State<TextEditingValue>& value, MarkdownEditorOptions options = {}) {
   return MarkdownEditor(value.Get(), std::move(options));

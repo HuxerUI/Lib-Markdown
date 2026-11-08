@@ -33,14 +33,14 @@ View EventApp() {
   auto dark = UseState(false);
   return Column{
     Row{
-      Button("Replace handler").OnClick([version]() mutable { version = version.Get() + 1; }),
+      Button("Replace handler").OnClick([version]() mutable { ++version; }),
       Button("Unmount").OnClick([mounted]() mutable { mounted = false; }),
-      Button("Theme").OnClick([dark]() mutable { dark = !dark.Get(); }),
+      Button("Theme").OnClick([dark]() mutable { dark = !dark; }),
     },
-    MaterialTheme(dark.Get() ? MaterialDarkThemeSpec() : MaterialLightThemeSpec(), Scope([=]() -> View {
-      const int current_version = version.Get();
+    MaterialTheme(dark ? MaterialDarkThemeSpec() : MaterialLightThemeSpec(), Scope([=]() -> View {
+      const int current_version = version;
       View first = Text("Detached");
-      if (mounted.Get()) {
+      if (mounted) {
         first = Markdown(document, {
           .code_block_renderer = [](const MarkdownNode& code) -> View {
             retained_emitter = UseEvents();

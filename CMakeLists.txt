@@ -3,7 +3,7 @@ if(CMAKE_HOST_APPLE AND NOT CMAKE_SYSTEM_NAME AND NOT CMAKE_TOOLCHAIN_FILE
         AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET AND "$ENV{MACOSX_DEPLOYMENT_TARGET}" STREQUAL "")
     set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS deployment target")
 endif()
-project(lib_markdown VERSION 0.2.2 LANGUAGES NONE)
+project(lib_markdown VERSION 0.2.23 LANGUAGES NONE)
 
 option(HUXERUI_MARKDOWN_BUILD_VIEW "Build the HuxerUI Markdown component" ON)
 option(HUXERUI_MARKDOWN_BUILD_TESTS "Build Markdown tests" OFF)
@@ -15,7 +15,8 @@ endif()
 
 set(_markdown_sources src/document.cpp third_party/md4c/md4c.c third_party/md4c/entity.c)
 if(HUXERUI_MARKDOWN_BUILD_VIEW)
-    huxerui_add_library(huxerui_markdown SOURCES src/markdown.cpp src/editing.cpp src/rich_text.cpp ${_markdown_sources})
+    huxerui_add_library(huxerui_markdown SOURCES src/markdown.cpp src/editing.cpp src/rich_text.cpp
+        src/document_editor_internal.cpp src/rich_text_model.cpp src/rich_text_editor.cpp ${_markdown_sources})
 else()
     add_library(huxerui_markdown STATIC ${_markdown_sources})
 endif()

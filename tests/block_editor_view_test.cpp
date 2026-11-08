@@ -34,7 +34,7 @@ int main() { return Run([] {
   CHECK(input.One().value == "first **bold**");
   const auto active_session = ui.ActiveTextInput()->session_id;
   input.ReplaceText("中文😀 **实时**");
-  CHECK(source.Get().text == "# heading\n\n中文😀 **实时**\n\nsecond😀\n\n- read only\n");
+  CHECK(source->text == "# heading\n\n中文😀 **实时**\n\nsecond😀\n\n- read only\n");
   CHECK(ui.Find(UiSelector::Key("markdown-block-preview")).Find(UiSelector::Text("中文😀 实时")).Exists());
   CHECK(ui.ActiveTextInput()->session_id == active_session);
   std::string expected = "中文😀 实时";
@@ -53,7 +53,7 @@ int main() { return Run([] {
   // Native composition remains on the same mounted client through parsing.
   CHECK(ui.SendTextInput({active_session, {{.kind = TextInputCommandKind::UpdateComposition, .text = "拼音"}}}).result_code == TextInputResultCode::Ok);
   ui.Pump();
-  CHECK(source.Get().composition.has_value());
+  CHECK(source->composition.has_value());
   CHECK(ui.ActiveTextInput()->session_id == active_session);
   ui.PressKey(Key::Enter, {.control = true});
   CHECK(ui.ActiveTextInput()->session_id == active_session);
@@ -71,7 +71,7 @@ int main() { return Run([] {
   CHECK(ui.Find(UiSelector::Text("new paragraph")).Exists());
   CHECK(ui.Find(UiSelector::Text("second changed")).Exists());
   CHECK(!ui.Find(UiSelector::Key("markdown-block-preview")).Exists());
-  CHECK(source.Get().text == "# heading\n\n## split\n\nnew paragraph\n\nsecond changed\n\n- read only\n");
+  CHECK(source->text == "# heading\n\n## split\n\nnew paragraph\n\nsecond changed\n\n- read only\n");
   CHECK(error.empty());
   source = TextEditingValue::FromText("[[page|label]]");
   ui.Pump();
@@ -99,15 +99,15 @@ int main() { return Run([] {
   ui.PumpAndSettle();
   ui.Find(UiSelector::Text("paragraph 199")).Tap();
   input.ReplaceText("last edited");
-  CHECK(source.Get().text.ends_with("last edited\n\n"));
+  CHECK(source->text.ends_with("last edited\n\n"));
   const auto last_session = ui.ActiveTextInput()->session_id;
   CHECK(ui.SendTextInput({last_session, {{.kind = TextInputCommandKind::UpdateComposition, .text = "组合"}}}).result_code == TextInputResultCode::Ok);
   ui.Pump();
   CHECK(scroll.ScrollToItem(0));
   ui.PumpAndSettle();
   CHECK(!ui.Find(UiSelector::Text("paragraph 199")).Exists());
-  CHECK(source.Get().text.ends_with("last edited组合\n\n"));
-  CHECK(!source.Get().composition);
+  CHECK(source->text.ends_with("last edited组合\n\n"));
+  CHECK(!source->composition);
   CHECK(scroll.ScrollToItem(398));
   ui.PumpAndSettle();
   CHECK(ui.Find(UiSelector::Text("last edited组合")).Exists());

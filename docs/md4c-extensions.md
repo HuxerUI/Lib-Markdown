@@ -142,7 +142,7 @@ return Markdown(document)
 
 MD4C 的 syntax 字段是保留字段，不是语法插件接口。未来自定义语法另行设计，保持第三方代码
 与应用扩展层分离。[Writer demo](../examples/editor/README.md) 支持正文与表格单元格保持排版直接编辑，
-保守源码区间、语义格式模型和块编辑会话均在库层；统一事务仍待实现。
+保守源码区间、语义格式模型和统一文档事务均在库层实现。
 见[块级编辑](block-editing.md)和[后续讨论](editor-follow-up.md)。
 
 ## 验证

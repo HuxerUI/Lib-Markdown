@@ -2,9 +2,10 @@ cmake_minimum_required(VERSION 3.20)
 project(rich_text_editor_experiment VERSION 0.1.0 LANGUAGES CXX)
 include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/HuxerUIDependency.cmake")
 
-add_library(huxerui_rich_text_editor STATIC editor.cpp model.cpp)
+add_library(huxerui_rich_text_editor STATIC ../../src/rich_text_editor.cpp ../../src/rich_text_model.cpp)
 target_compile_features(huxerui_rich_text_editor PUBLIC cxx_std_20)
 set_target_properties(huxerui_rich_text_editor PROPERTIES CXX_EXTENSIONS OFF)
+target_include_directories(huxerui_rich_text_editor PUBLIC ../../src)
 target_link_libraries(huxerui_rich_text_editor PUBLIC HuxerUI::huxerui)
 target_compile_options(huxerui_rich_text_editor PRIVATE
     "$<$<CXX_COMPILER_ID:MSVC>:/W4;/permissive->"

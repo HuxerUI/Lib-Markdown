@@ -9,10 +9,7 @@
 #include <functional>
 #include <utility>
 
-#ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
 #include "document_editor_internal.h"
-#include "editor.h"
-#endif
 
 namespace markdown_writer {
 using namespace huxerui;
@@ -108,7 +105,7 @@ void Schedule(const std::shared_ptr<WriterSession>& session, TaskScope tasks, st
     if (session->request != request) co_return;
     session->scheduled = false;
     auto latest = std::move(session->latest);
-    (void)Publish(session, latest, document, status);
+    Publish(session, latest, document, status);
   });
 }
 
@@ -147,51 +144,51 @@ View App() {
   const auto format_actions = UseState(std::make_shared<rich_text::detail::InlineFormatActions>()).Get();
 #endif
   Lifecycle([=] {
-    (void)Publish(session.Get(), initial_source, document, status);
+    Publish(session, initial_source, document, status);
     return [session] { session.Get()->Cancel(); };
   });
-  return MaterialTheme(dark.Get() ? MaterialDarkThemeSpec() : MaterialLightThemeSpec(), Scope([=] {
+  return MaterialTheme(dark ? MaterialDarkThemeSpec() : MaterialLightThemeSpec(), Scope([=] {
     const auto theme = UseTheme();
     const bool compact = UseViewportClass() == ViewportClass::Compact;
     auto style = MarkdownStyle::FromTheme(theme);
     style.body.font = style.body.font.WithSize(18);
     style.blank_line_height = 24;
     const std::function<void(std::size_t)> switch_tab = [=](std::size_t index) mutable {
-      if (index == selected_tab.Get() || index >= tabs.Get().size()) return;
+      if (index == selected_tab || index >= tabs->size()) return;
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-      if (document_composing.Get()) { status = "请先完成输入法组合输入。"; return; }
+      if (document_composing) { status = "请先完成输入法组合输入。"; return; }
 #endif
-      if (draft.Get().composition) { status = "请先完成输入法组合输入。"; return; }
+      if (draft->composition) { status = "请先完成输入法组合输入。"; return; }
       session.Get()->Cancel();
       auto updated = tabs.Get();
-      updated[selected_tab.Get()].draft = draft.Get();
+      updated[selected_tab].draft = draft;
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-      updated[selected_tab.Get()].editor = document_editor.Get();
+      updated[selected_tab].editor = document_editor;
       const auto restore_error = PrepareDocumentEditor(updated[index]);
       document_editor = updated[index].editor;
-      document_active = !editing.Get() && document_editor.Get() != nullptr;
+      document_active = !editing && document_editor.Get() != nullptr;
       preferred_document_mode = true;
       if (restore_error) editing = true;
 #endif
       draft = updated[index].draft;
       tabs = std::move(updated);
       selected_tab = index;
-      (void)Publish(session.Get(), draft.Get().text, document, status);
+      Publish(session, draft->text, document, status);
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
       if (restore_error) status = "当前文件需要源码模式：" + *restore_error;
 #endif
     };
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-    const bool document_mode = document_active.Get();
+    const bool document_mode = document_active;
 #else
     constexpr bool document_mode = false;
 #endif
     std::vector<View> toolbar;
     const auto command_selection = [=]() -> std::optional<TextSelection> {
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-      if (document_active.Get()) return format_actions->selection ? format_actions->selection() : std::nullopt;
+      if (document_active) return format_actions->selection ? format_actions->selection() : std::nullopt;
 #endif
-      return draft.Get().selection;
+      return draft->selection;
     };
     const auto add_command = [&](const char* title, const char* key, MarkdownEditCommand command) {
       toolbar.push_back(Button(title).On<ViewEvents::Pointer>([=](const PointerEvent& event) {
@@ -209,7 +206,7 @@ View App() {
               ? std::optional{saved->second} : command_selection();
           if (!selection) return;
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-          if (document_active.Get()) {
+          if (document_active) {
             using rich_text::detail::InlineFormat;
             const auto format = command == MarkdownEditCommand::Bold ? InlineFormat::Bold :
                 command == MarkdownEditCommand::Italic ? InlineFormat::Italic : InlineFormat::Code;
@@ -221,70 +218,66 @@ View App() {
           input.selection = *selection;
           draft = ApplyMarkdownCommand(input, command);
           ++session.Get()->edit_revision;
-          Schedule(session.Get(), tasks, draft.Get().text, document, status);
+          Schedule(session, tasks, draft->text, document, status);
         } catch (const std::exception& error) { status = std::string("无法格式化：") + error.what(); }
       }).Key(key));
     };
-    if (editing.Get() || document_mode) {
+    if (editing || document_mode) {
       add_command("粗体", "format-bold", MarkdownEditCommand::Bold);
       add_command("斜体", "format-italic", MarkdownEditCommand::Italic);
       add_command("代码", "format-code", MarkdownEditCommand::InlineCode);
     }
-    if (editing.Get()) {
+    if (editing) {
       add_command("标题", "format-heading", MarkdownEditCommand::Heading1);
       add_command("小标题", "format-heading2", MarkdownEditCommand::Heading2);
       add_command("列表", "format-list", MarkdownEditCommand::BulletList);
       add_command("引用", "format-quote", MarkdownEditCommand::BlockQuote);
     }
     const auto update_source = [=](const TextEditingValue& next) mutable {
-      const bool changed = next.text != draft.Get().text;
+      const bool changed = next.text != draft->text;
       const bool line_count_changed = changed &&
           std::count(next.text.begin(), next.text.end(), '\n') !=
-          std::count(draft.Get().text.begin(), draft.Get().text.end(), '\n');
+          std::count(draft->text.begin(), draft->text.end(), '\n');
       draft = next;
       if (changed) {
         ++session.Get()->edit_revision;
         if (line_count_changed) {
           session.Get()->Cancel();
-          (void)Publish(session.Get(), next.text, document, status);
-        } else Schedule(session.Get(), tasks, next.text, document, status);
+          Publish(session, next.text, document, status);
+        } else Schedule(session, tasks, next.text, document, status);
       }
     };
     View body;
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
     using huxerui::markdown::detail::EditableMarkdownDocument;
-    using huxerui::markdown::detail::EditableMarkdownLayout;
     using huxerui::markdown::detail::EditableMarkdownSource;
     using huxerui::markdown::detail::EditableMarkdownSyntax;
+    using huxerui::markdown::detail::MarkdownDocumentEditor;
     if (document_mode) {
-      body = rich_text::detail::RichTextEditor(document_editor.Get(), {
-          .base_style = style.body,
-          .paragraph_spacing = style.block_spacing,
-          .layout = [style](const rich_text::detail::Document& doc) {
-            return EditableMarkdownLayout(doc, style);
-          },
-          .changed = [=](const rich_text::detail::Document& doc, std::optional<TextRange> composition) mutable {
-            document_composing = composition.has_value();
-            const auto source = EditableMarkdownSource(doc);
-            if (source == draft.Get().text) return;
-            draft = TextEditingValue::FromText(std::string(source));
-            document = EditableMarkdownSyntax(doc);
-            ++session.Get()->edit_revision;
-            status = "跨段编辑 · 草稿已更新";
-          },
-          .rejected = [status](std::string_view error) mutable {
-            status = "无法跨段编辑：" + std::string(error);
-          },
-          .format_actions = format_actions,
-      }).Key("writer-document-" + std::to_string(tabs.Get().at(selected_tab.Get()).id));
+      body = MarkdownDocumentEditor(document_editor, {
+          .parse_options = WriterOptions(),
+          .markdown_options = {.style = style},
+          .virtualization = {.scroll_controller = scroll},
+          .live_preview = preview,
+      }, [=](const TextEditingValue& next) mutable {
+        document_composing = next.composition.has_value();
+        const bool source_changed = next.text != draft->text;
+        draft = next;
+        if (!source_changed) return;
+        document = EditableMarkdownSyntax(document_editor.Get()->Current().document);
+        ++session.Get()->edit_revision;
+        status = "跨段编辑 · 草稿已更新";
+      }, [status](std::string_view error) mutable {
+        status = "无法跨段编辑：" + std::string(error);
+      }, format_actions).Key("writer-document-" + std::to_string(tabs->at(selected_tab).id));
     } else
 #endif
-    if (editing.Get()) {
+    if (editing) {
       View source;
       // Keep the original single-field selection behavior for ordinary documents.
       // The tab's opening size selects the layout path, avoiding a mid-edit mode switch.
-      if (tabs.Get().at(selected_tab.Get()).draft.text.size() >= 64 * 1024) {
-        source = LargeSourceEditor(draft.Get(), {
+      if (tabs->at(selected_tab).draft.text.size() >= 64 * 1024) {
+        source = LargeSourceEditor(draft, {
             .style = style.body,
             .changed = update_source,
         }).Key("writer-source");
@@ -292,8 +285,8 @@ View App() {
         source = TextField(draft).LineLimits(TextFieldLineLimits::MultiLine(1))
             .VerticalAlign(TextVerticalAlign::Top).OnChanged(update_source).Key("writer-source");
       }
-      if (preview.Get()) {
-        View rendered = VirtualizedMarkdown(document.Get(), {.style = style}, {.scroll_controller = scroll})
+      if (preview) {
+        View rendered = VirtualizedMarkdown(document, {.style = style}, {.scroll_controller = scroll})
             .On<MarkdownEvents::LinkActivated>([status](const MarkdownLinkActivation& event) mutable {
               status = "链接：" + event.destination;
             }).Key("writer-preview");
@@ -301,28 +294,28 @@ View App() {
                        : View(Row{std::move(source).With(Grow{}), std::move(rendered).With(Grow{})}.With(Spacing(24.0F), CrossAlign(CrossAxisAlignment::Stretch)));
       } else body = std::move(source);
     } else {
-      body = MarkdownEditor(draft, {.parse_options = WriterOptions(), .markdown_options = {.style = style},
-          .virtualization = {.scroll_controller = scroll}, .live_preview = preview.Get()})
+      body = huxerui::markdown::detail::MarkdownBlockEditor(draft, {.parse_options = WriterOptions(), .markdown_options = {.style = style},
+          .virtualization = {.scroll_controller = scroll}, .live_preview = preview})
           .On<MarkdownEditorEvents::Changed>(update_source)
           .On<MarkdownEditorEvents::Error>([status](const std::string& error) mutable {
             status = "无法编辑：" + error;
           }).Key("writer-editor");
     }
     const auto new_tab = [=]() mutable {
-      if (draft.Get().composition) { status = "请先完成输入法组合输入。"; return; }
+      if (draft->composition) { status = "请先完成输入法组合输入。"; return; }
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-      if (document_composing.Get()) { status = "请先完成输入法组合输入。"; return; }
+      if (document_composing) { status = "请先完成输入法组合输入。"; return; }
 #endif
       session.Get()->Cancel();
       auto updated = tabs.Get();
-      updated[selected_tab.Get()].draft = draft.Get();
+      updated[selected_tab].draft = draft;
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-      updated[selected_tab.Get()].editor = document_editor.Get();
+      updated[selected_tab].editor = document_editor;
 #endif
       const auto title = "文档 " + std::to_string(next_tab_number.Get());
-      next_tab_number = next_tab_number.Get() + 1;
+      ++next_tab_number;
       WriterTab opened{title, TextEditingValue::FromText("# " + title + "\n\n")};
-      opened.id = next_tab_id.Get();
+      opened.id = next_tab_id;
       next_tab_id = opened.id + 1;
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
       opened.editor = std::make_shared<rich_text::detail::EditSession>(
@@ -336,14 +329,14 @@ View App() {
       selected_tab = updated.size() - 1;
       draft = updated.back().draft;
       tabs = std::move(updated);
-      (void)Publish(session.Get(), draft.Get().text, document, status);
+      Publish(session, draft->text, document, status);
     };
     const std::function<void(std::size_t)> close_tab = [=](std::size_t closing) mutable {
       auto updated = tabs.Get();
       if (updated.size() == 1 || closing >= updated.size()) return;
-      if (draft.Get().composition) { status = "请先完成输入法组合输入。"; return; }
+      if (draft->composition) { status = "请先完成输入法组合输入。"; return; }
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-      if (document_composing.Get()) { status = "请先完成输入法组合输入。"; return; }
+      if (document_composing) { status = "请先完成输入法组合输入。"; return; }
 #endif
       const auto current = selected_tab.Get();
       if (closing == current) session.Get()->Cancel();
@@ -359,32 +352,32 @@ View App() {
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
       const auto restore_error = PrepareDocumentEditor(updated[index]);
       document_editor = updated[index].editor;
-      document_active = !editing.Get() && document_editor.Get() != nullptr;
+      document_active = !editing && document_editor.Get() != nullptr;
       preferred_document_mode = true;
       if (restore_error) editing = true;
 #endif
       selected_tab = index;
       tabs = std::move(updated);
-      (void)Publish(session.Get(), draft.Get().text, document, status);
+      Publish(session, draft->text, document, status);
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
       if (restore_error) status = "当前文件需要源码模式：" + *restore_error;
 #endif
     };
-    toolbar.push_back(Button(editing.Get() ? "原位编辑" : "编辑源码").OnClick([=]() mutable {
+    toolbar.push_back(Button(editing ? "原位编辑" : "编辑源码").OnClick([=]() mutable {
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-          if (document_composing.Get()) { status = "请先完成输入法组合输入。"; return; }
+          if (document_composing) { status = "请先完成输入法组合输入。"; return; }
 #endif
-          if (draft.Get().composition) { status = "请先完成输入法组合输入。"; return; }
+          if (draft->composition) { status = "请先完成输入法组合输入。"; return; }
           session.Get()->Cancel();
-          if (Publish(session.Get(), draft.Get().text, document, status)) {
+          if (Publish(session, draft->text, document, status)) {
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-            if (editing.Get() && preferred_document_mode.Get()) {
+            if (editing && preferred_document_mode) {
               try {
                 auto editor = document_editor.Get();
                 if (!editor) editor = std::make_shared<rich_text::detail::EditSession>(
-                    EditableMarkdownDocument(draft.Get().text, WriterOptions()));
-                else if (EditableMarkdownSource(editor->Current().document) != draft.Get().text)
-                  editor->Import(EditableMarkdownDocument(draft.Get().text, WriterOptions()));
+                    EditableMarkdownDocument(draft->text, WriterOptions()));
+                else if (EditableMarkdownSource(editor->Current().document) != draft->text)
+                  editor->Import(EditableMarkdownDocument(draft->text, WriterOptions()));
                 document = EditableMarkdownSyntax(editor->Current().document);
                 document_editor = std::move(editor);
                 document_active = true;
@@ -394,13 +387,13 @@ View App() {
               }
             } else document_active = false;
 #endif
-            editing = !editing.Get();
+            editing = !editing;
           }
         }).Key("mode-toggle"));
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
     toolbar.push_back(Button(document_mode ? "单块编辑" : "整篇编辑").OnClick([=]() mutable {
-          if (draft.Get().composition || document_composing.Get()) { status = "请先完成输入法组合输入。"; return; }
-          if (document_active.Get()) {
+          if (draft->composition || document_composing) { status = "请先完成输入法组合输入。"; return; }
+          if (document_active) {
             document_active = false;
             preferred_document_mode = false;
             status = "已切换单块编辑";
@@ -408,7 +401,7 @@ View App() {
           }
           try {
             auto editor = document_editor.Get();
-            const auto& source = draft.Get().text;
+            const auto& source = draft->text;
             if (!editor) {
               editor = std::make_shared<rich_text::detail::EditSession>(EditableMarkdownDocument(source, WriterOptions()));
             } else if (EditableMarkdownSource(editor->Current().document) != source) {
@@ -428,8 +421,8 @@ View App() {
           }
         }).Key("document-mode-toggle"));
 #endif
-    toolbar.push_back(Checkbox("实时预览", preview.Get()).OnChanged([preview](bool enabled) mutable { preview = enabled; }).Key("writer-preview-toggle"));
-    toolbar.push_back(Button("打开文件").With(Enabled(!opening_file.Get() && picker->CanOpenFiles()))
+    toolbar.push_back(Checkbox("实时预览", preview).OnChanged([preview](bool enabled) mutable { preview = enabled; }).Key("writer-preview-toggle"));
+    toolbar.push_back(Button("打开文件").With(Enabled(!opening_file && picker->CanOpenFiles()))
         .OnClick([=]() mutable {
           opening_file = true;
           tasks.Launch([=]() mutable -> Task<void> {
@@ -444,27 +437,27 @@ View App() {
               co_return;
             }
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-            if (document_composing.Get()) {
+            if (document_composing) {
               status = "请先完成输入法组合输入。";
               opening_file = false;
               co_return;
             }
 #endif
-            if (draft.Get().composition) {
+            if (draft->composition) {
               status = "请先完成输入法组合输入。";
               opening_file = false;
               co_return;
             }
             session.Get()->Cancel();
             auto updated = tabs.Get();
-            updated[selected_tab.Get()].draft = draft.Get();
+            updated[selected_tab].draft = draft;
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
-            updated[selected_tab.Get()].editor = document_editor.Get();
+            updated[selected_tab].editor = document_editor;
 #endif
             const auto title = selected->Name().empty() ? "未命名文档" : selected->Name();
             WriterTab opened{title, TextEditingValue::FromText(std::move(result).Value())};
             opened.file = std::make_shared<FileReference>(std::move(*selected));
-            opened.id = next_tab_id.Get();
+            opened.id = next_tab_id;
             next_tab_id = opened.id + 1;
 #ifdef HUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE
             try {
@@ -474,21 +467,21 @@ View App() {
             document_editor = opened.editor;
             document_active = opened.editor != nullptr;
             preferred_document_mode = document_active.Get();
-            if (document_active.Get()) editing = false;
+            if (document_active) editing = false;
 #endif
             updated.push_back(std::move(opened));
             selected_tab = updated.size() - 1;
             draft = updated.back().draft;
             tabs = std::move(updated);
-            (void)Publish(session.Get(), draft.Get().text, document, status);
+            Publish(session, draft->text, document, status);
             opening_file = false;
           });
         }).Key("writer-open-file"));
-    const auto current_file = tabs.Get().at(selected_tab.Get()).file;
-    toolbar.push_back(Button("保存").With(Enabled(current_file && current_file->CanWrite() && !saving_file.Get()))
+    const auto current_file = tabs->at(selected_tab).file;
+    toolbar.push_back(Button("保存").With(Enabled(current_file && current_file->CanWrite() && !saving_file))
         .OnClick([=]() mutable {
           saving_file = true;
-          const auto contents = draft.Get().text;
+          const auto contents = draft->text;
           tasks.Launch([=]() mutable -> Task<void> {
             auto opened = co_await current_file->OpenWriteAsync();
             if (!opened.Succeeded()) {
@@ -511,21 +504,21 @@ View App() {
             saving_file = false;
           });
         }).Key("writer-save-file"));
-    toolbar.push_back(Button(dark.Get() ? "浅色" : "深色").OnClick([dark]() mutable { dark = !dark.Get(); }).Key("writer-theme"));
+    toolbar.push_back(Button(dark ? "浅色" : "深色").OnClick([dark]() mutable { dark = !dark; }).Key("writer-theme"));
     std::vector<View> tab_views;
-    const bool closeable = tabs.Get().size() > 1;
-    for (std::size_t index = 0; index < tabs.Get().size(); ++index) {
-      const auto& tab = tabs.Get()[index];
+    const bool closeable = tabs->size() > 1;
+    for (std::size_t index = 0; index < tabs->size(); ++index) {
+      const auto& tab = tabs->operator[](index);
       const auto title = tab.title;
       const auto id = tab.id;
-      const bool selected = index == selected_tab.Get();
+      const bool selected = index == selected_tab;
       tab_views.push_back(Scope([=]() mutable -> View {
         auto hovered = UseState(false);
         std::vector<View> content;
         content.push_back(Text(title).Style({Font::System(14),
             selected ? theme.colors.primary : theme.colors.on_surface_variant}));
         if (closeable) {
-          if (hovered.Get()) {
+          if (hovered) {
             content.push_back(Text("×").Style({Font::System(18), theme.colors.on_surface_variant})
                 .Align(TextAlign::Center)
                 .With(Frame{.width = 24.0F, .height = 24.0F}, PointerCursor(PointerCursorKind::Hand),
@@ -562,7 +555,7 @@ View App() {
             .Key("writer-logo"),
         ScrollView(Row(std::move(tab_views)).With(Spacing(4.0F), CrossAlign(CrossAxisAlignment::Center),
             Semantics{.role = SemanticRole::TabList,
-                      .collection = SemanticCollection{.item_count = tabs.Get().size()}}))
+                      .collection = SemanticCollection{.item_count = tabs->size()}}))
             .ScrollAxis(Axis::Horizontal).With(Grow{}).Key("writer-tabs"),
       }.With(Padding(EdgeInsets::Symmetric(compact ? 8.0F : 16.0F, 4.0F)), Spacing(8.0F), Background{theme.colors.surface}),
       Flow(std::move(toolbar)).With(Padding(EdgeInsets::Symmetric(compact ? 8.0F : 16.0F, 6.0F)), Spacing(8.0F)).Key("writer-toolbar"),
