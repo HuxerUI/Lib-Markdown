@@ -54,5 +54,21 @@ int main() {
     ui.PressKey(Key::ArrowRight);
     CHECK(ui.ActiveTextInput()->selection.IsCollapsed());
     CHECK(ui.ActiveTextInput()->selection.active == initial.selection.Range().end);
+    ui.PumpAndSettle();
+
+    // A pending caret reveal must not override the user's subsequent scrolling.
+    CHECK(ui.SendTextInput({initial.session_id, {
+      {.kind = TextInputCommandKind::SetSelection, .selection_after = TextSelection{0, 0}},
+    }}).result_code == TextInputResultCode::Ok);
+    CHECK(editor.ScrollUntil(UiSelector::Text("Offscreen 90"), {.step = {0.0F, 220.0F}}).Exists());
+    ui.PumpAndSettle();
+    CHECK(ui.Find(UiSelector::Text("Offscreen 90")).One().in_viewport);
+    CHECK(!ui.Find(UiSelector::Text("First")).Exists());
+    CHECK(ui.ActiveTextInput()->selection.active == 0);
+
+    // Explicit keyboard navigation can still reveal the offscreen caret afterwards.
+    ui.PressKey(Key::ArrowRight);
+    ui.PumpAndSettle();
+    CHECK(ui.Find(UiSelector::Text("First")).One().in_viewport);
   });
 }

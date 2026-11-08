@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.4 (2026-11-08)
+
+- Prevent caret reveal from overriding deliberate scrolling in the document editor.
+  Ignore stale reveals after the user changes the offset, stop returning offscreen cached
+  caret geometry to the platform's automatic reveal path, and keep explicit keyboard navigation.
+- Add a regression that scrolls away from a selected paragraph before using keyboard reveal again.
+
 ## 0.2.23 (2026-11-08)
 
 - Move the document edit session, cross-block selection, IME transactions and undo/redo

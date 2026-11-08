@@ -117,19 +117,31 @@ public:
     if (entry != rows_.end() && entry->second == &row) rows_.erase(entry);
   }
 
-  void OwnerGeometry(Transform2D transform, Color selection) {
+  void OwnerGeometry(Transform2D transform, Color selection, Rect viewport) {
     transform_ = transform;
     selection_color_ = selection;
+    viewport_bounds_ = viewport;
   }
 
   void RevealIfNeeded() {
     if (!reveal_) return;
+    const auto reveal_offset = reveal_offset_;
     reveal_ = false;
+    reveal_offset_.reset();
+    // A user scroll since the request makes the old caret reveal stale.
+    if (reveal_offset && *reveal_offset != scroll_.Offset()) return;
     const auto position = Current().document.Locate(Current().selection.active);
     if (!Mounted(position.index)) {
       scroll_.ScrollToItem(item_for_paragraph_ ? item_for_paragraph_(position.index) : position.index);
     }
   }
+
+  void CancelReveal() {
+    reveal_ = false;
+    reveal_offset_.reset();
+  }
+
+  void ViewportScrolled() override { CancelReveal(); }
 
   TextInputConfiguration Configuration() const override { return {.multiline = true}; }
 
@@ -184,6 +196,8 @@ public:
       const auto affinity = range.end == Current().selection.active ? Current().selection.affinity
                                                                      : TextAffinity::Downstream;
       if (const auto caret = Caret({range.end, affinity})) {
+        // Cached rows can be outside the viewport; do not let the platform reveal them.
+        if (!viewport_bounds_.IsEmpty() && !viewport_bounds_.Intersects(*caret)) return QueryFailure<TextInputGeometry>(id);
         return {TextInputResultCode::Ok, id, *caret, Rectangles(range)};
       }
     } catch (const std::invalid_argument&) {
@@ -372,6 +386,7 @@ private:
     if (document_changed || before.selection != Current().selection || composition_changed) {
       ++revision_;
       reveal_ |= reveal;
+      if (reveal) reveal_offset_ = scroll_.Offset();
       Refresh();
     }
     if ((document_changed || before.selection != Current().selection || composition_changed) && changed_)
@@ -471,11 +486,13 @@ private:
   std::function<std::size_t(std::size_t)> item_for_paragraph_;
   std::map<TextBlockId, RowGeometry*> rows_;
   Transform2D transform_;
+  Rect viewport_bounds_;
   Color selection_color_{};
   TextInputSessionId session_ = 0;
   std::uint64_t revision_ = 0;
   std::uint64_t content_revision_ = 0;
   bool reveal_ = true;
+  std::optional<float> reveal_offset_;
 };
 
 struct DocumentSurface {
@@ -494,7 +511,7 @@ public:
   }
 
   PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer&) override {
-    value_.editor->OwnerGeometry(Transform(node), value_.selection);
+    value_.editor->OwnerGeometry(Transform(node), value_.selection, node.ContentBounds());
     return PaintInvalidation::None;
   }
 
@@ -517,6 +534,15 @@ public:
     }
     if (event.type == PointerEventType::Up || event.type == PointerEventType::Cancel) drag_.reset();
     return PointerResult::Handled;
+  }
+
+  float OnPreScroll(ViewNode&, Axis, float, ScrollSource source) override {
+    if (source != ScrollSource::FocusReveal) value_.editor->CancelReveal();
+    return 0.0F;
+  }
+
+  void OnScrollActivity(ViewNode&, const ScrollActivity& activity) override {
+    if (activity.source != ScrollSource::FocusReveal) value_.editor->CancelReveal();
   }
 
   void BuildSemantics(SemanticBuilder& builder) const override {
