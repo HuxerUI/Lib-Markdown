@@ -177,9 +177,8 @@ cmake --build build-editor --config Release --parallel
 
 需要 CMake 3.20+、C99/C++20 编译器，以及同时提供 `TextField::TextStyles` 和
 `TextMeasurer::LayoutText`/`TextParagraphLayout` 的 HuxerUI SDK 或源码。
-在这两项能力进入官方主线前，native CI 组合使用
-[PR #153](https://github.com/HuxerUI/HuxerUI/pull/153)（`e29c3c2`）和
-[PR #154](https://github.com/HuxerUI/HuxerUI/pull/154)（`554d9a5`）。仅构建解析器不需要 HuxerUI。
+CI 固定使用 [`FarnaHerry/HuxerUI`](https://github.com/FarnaHerry/HuxerUI) 的 `farna/main` 提交
+`062f3092`（SDK 0.4.0，包含上述两项接口）。仅构建解析器不需要 HuxerUI。
 
 ```sh
 cmake -S . -B build -DHUXERUI_HOME=/path/to/HuxerUI \

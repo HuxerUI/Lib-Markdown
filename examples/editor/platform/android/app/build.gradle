@@ -42,9 +42,29 @@ def huxeruiNdkVersion = huxeruiProperty("huxeruiNdkVersion")
 def huxeruiAbis = huxeruiProperty("huxeruiAbis").split(",")
 def huxeruiStl = huxeruiProperty("huxeruiStl")
 
+// Fixed demo signing identity so every release build (local and CI) shares one certificate.
+// Override with -PmarkdownWriterStorePassword/-PmarkdownWriterKeyAlias/-PmarkdownWriterKeyPassword
+// before publishing with a private keystore.
+def markdownWriterKeystore = rootProject.file("keystore/markdown-writer-release.jks")
+if (!markdownWriterKeystore.isFile()) {
+    throw new GradleException("Markdown Writer release keystore is missing: ${markdownWriterKeystore}")
+}
+def markdownWriterStorePassword = providers.gradleProperty("markdownWriterStorePassword").orElse("markdown-writer-demo").get()
+def markdownWriterKeyAlias = providers.gradleProperty("markdownWriterKeyAlias").orElse("markdown-writer").get()
+def markdownWriterKeyPassword = providers.gradleProperty("markdownWriterKeyPassword").orElse(markdownWriterStorePassword).get()
+
 android {
     buildFeatures {
         buildConfig = true
+    }
+
+    signingConfigs {
+        release {
+            storeFile markdownWriterKeystore
+            storePassword markdownWriterStorePassword
+            keyAlias markdownWriterKeyAlias
+            keyPassword markdownWriterKeyPassword
+        }
     }
 
     namespace = "org.huxerui.markdown.editor"
@@ -61,7 +81,9 @@ android {
         externalNativeBuild {
             cmake {
                 arguments "-DANDROID_STL=${huxeruiStl}",
-                        "-DHUXERUI_HOME=${huxeruiHome.absolutePath}"
+                        "-DHUXERUI_HOME=${huxeruiHome.absolutePath}",
+                        "-DHUXERUI_OPTIMIZATION=${providers.gradleProperty('huxeruiOptimization').orElse('default').get()}",
+                        "-DHUXERUI_ENABLE_LTO=${providers.gradleProperty('huxeruiLto').orElse('OFF').get()}"
             }
         }
 
@@ -72,8 +94,16 @@ android {
 
     buildTypes {
         release {
+            signingConfig = signingConfigs.release
             minifyEnabled = false
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+
+    packaging {
+        jniLibs {
+            // Compress native libraries in the APK; the platform extracts them at install time.
+            useLegacyPackaging = true
         }
     }
 

@@ -273,10 +273,9 @@ resource directory. A root build with examples enabled builds both demos.
 
 Requires CMake 3.20+, a C99/C++20 toolchain, and HuxerUI with both
 `TextField::TextStyles` and `TextMeasurer::LayoutText`/`TextParagraphLayout`.
-Until the changes reach the SDK main branch, native CI combines
-[PR #153](https://github.com/HuxerUI/HuxerUI/pull/153) (`e29c3c2`) and
-[PR #154](https://github.com/HuxerUI/HuxerUI/pull/154) (`554d9a5`). Parser-only builds
-need no HuxerUI dependency.
+CI pins [`FarnaHerry/HuxerUI`](https://github.com/FarnaHerry/HuxerUI) `farna/main` at
+`062f3092` (SDK 0.4.0 plus both paragraph APIs). Parser-only builds need no HuxerUI
+dependency.
 
 ```sh
 cmake -S . -B build -DHUXERUI_HOME=/path/to/HuxerUI \

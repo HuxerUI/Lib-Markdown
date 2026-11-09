@@ -34,9 +34,10 @@
 5. 结构编辑：扩展跨块选区、表格行列操作、列表标记和任务勾选切换，以及图片和脚注引用属性编辑。
 6. 超长单段落性能：目前保留字符级语义数据，更新和序列化仍线性；需要真实文档基准后再选择
    run tree、rope 或持久事务结构，不把顶层虚拟化当作所有编辑工作的虚拟化。
-7. SDK 分支合并/发布：所需接口已分别提交为 [PR #153](https://github.com/HuxerUI/HuxerUI/pull/153)
-   与 [PR #154](https://github.com/HuxerUI/HuxerUI/pull/154)。审查确认它们覆盖当前需求，等待作者 review/合并；
-   本库 CI 在合并前组合两个 PR 的已审核提交。
+7. SDK 分支合并/发布：所需接口由 [PR #153](https://github.com/HuxerUI/HuxerUI/pull/153)
+   与 [PR #154](https://github.com/HuxerUI/HuxerUI/pull/154) 提供，官方 0.4.0 主线尚未包含。
+   本库 CI 固定 fork `FarnaHerry/HuxerUI` 的 `farna/main` 提交 `062f3092`
+   （已合并 upstream 0.4.0 与两项接口，不再 cherry-pick），待上游合并后切换为正式 SDK。
 
 ## MD4C 剩余能力边界
 

@@ -60,13 +60,11 @@ Linux 包依赖系统提供 GTK4、libepoxy 和 libsoup 3；DEB/RPM 安装后可
 
 草稿在两种编辑方式和源码视图间共享。切换视图后，返回「跨段编辑」可继续原有撤销历史。期间的源码或块内修改合为一次导入。跨多个嵌套项的替换、嵌套结构调整、代码块和复杂行内内容可通过块内或源码模式处理。顶层空白行按正文段落间距显示，新建空段落在当前跨段会话中可输入。
 
-从库根目录构建此模式。以下命令将两项尚在 SDK 分支上的改动组合在独立的本地 SDK checkout 中。
+从库根目录构建此模式。以下命令使用固定版本、包含段落几何接口的本地 SDK checkout。
 
 ```powershell
 git clone https://github.com/FarnaHerry/HuxerUI.git .cache/writer-sdk
-git -C .cache/writer-sdk checkout --detach 554d9a540b40fa5a7b51125218a80166c86d8679
-git -C .cache/writer-sdk fetch https://github.com/HuxerUI/HuxerUI.git e29c3c2573dcd7db201e7523ff59803529875d52
-git -C .cache/writer-sdk cherry-pick --no-commit e29c3c2573dcd7db201e7523ff59803529875d52
+git -C .cache/writer-sdk checkout --detach 062f3092863d0061f282dbfe761a474077732772
 cmake -S examples/editor -B build-writer-experiment -DHUXERUI_HOME="$PWD/.cache/writer-sdk" -DHUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE=ON
 cmake --build build-writer-experiment --config Release --parallel
 .\build-writer-experiment\Release\markdown_editor.exe
@@ -84,7 +82,7 @@ CI 的独立 editor 作业还覆盖跨段编辑、多标签草稿隔离及每标
 
 1. 补齐原始拼写尚未规范化时的源码模式光标转换，以及列表续项、空项退出等结构化 Enter/Backspace。
 2. 扩展跨多个嵌套项的替换、表格行列操作及更完整的虚拟编辑滚动锚定。
-3. 等待 HuxerUI PR #153/#154 合入官方主线后，切换到正式发布 SDK 并做真实设备回归。
+3. 官方 HuxerUI 主线尚未包含 PR #153/#154 的接口；当前固定 fork 提交 `062f3092`，待上游合并后切换为正式发布 SDK 并做真实设备回归。
 
 源码区间、MarkdownBlockEditSession、MarkdownRichText 和 MarkdownEditor 均在库中，demo 负责组合与验收。
 需要 `TextField::TextStyles` SDK，版本见根 README。具体边界见[块级编辑接口](../../docs/block-editing.md)，

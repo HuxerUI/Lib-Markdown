@@ -1,6 +1,8 @@
 /build*/
 /.cache/
 /.huxerui/
+/examples/*/.huxerui/
+/examples/*/dist/
 /.vs/
 /.idea/
 /CMakeUserPresets.json

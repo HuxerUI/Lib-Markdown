@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+env:
+  # FarnaHerry/HuxerUI farna/main: SDK 0.4.0 with TextField::TextStyles and TextParagraphLayout.
+  HUXERUI_FORK: FarnaHerry/HuxerUI
+  HUXERUI_REVISION: 062f3092863d0061f282dbfe761a474077732772
+
 jobs:
   parser:
     strategy:
@@ -42,19 +47,12 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check out paragraph geometry PR 154
+      - name: Check out pinned HuxerUI SDK
         uses: actions/checkout@v4
         with:
-          repository: FarnaHerry/HuxerUI
-          ref: 554d9a540b40fa5a7b51125218a80166c86d8679
+          repository: ${{ env.HUXERUI_FORK }}
+          ref: ${{ env.HUXERUI_REVISION }}
           path: .cache/HuxerUI
-      - name: Apply attributed TextField PR 153
-        shell: pwsh
-        run: |
-          $revision = 'e29c3c2573dcd7db201e7523ff59803529875d52'
-          git -C .cache/HuxerUI fetch --no-tags https://github.com/HuxerUI/HuxerUI.git $revision
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git -C .cache/HuxerUI cherry-pick --no-commit $revision
       - name: Configure ${{ matrix.name }} independently
         run: cmake -S ${{ matrix.source }} -B build -DHUXERUI_HOME="${{ github.workspace }}/.cache/HuxerUI" -DHUXERUI_BUILD_TESTING_LIBRARY=ON ${{ matrix.options }}
       - name: Build
@@ -76,11 +74,11 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check out paragraph geometry SDK
+      - name: Check out pinned HuxerUI SDK
         uses: actions/checkout@v4
         with:
-          repository: FarnaHerry/HuxerUI
-          ref: 554d9a540b40fa5a7b51125218a80166c86d8679
+          repository: ${{ env.HUXERUI_FORK }}
+          ref: ${{ env.HUXERUI_REVISION }}
           path: .cache/paragraph-layout-sdk
       - name: Configure
         run: cmake -S experiments/rich_text_editor -B build -DHUXERUI_HOME="${{ github.workspace }}/.cache/paragraph-layout-sdk" -DHUXERUI_BUILD_TESTING_LIBRARY=ON

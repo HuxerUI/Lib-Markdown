@@ -8,6 +8,13 @@ on:
 permissions:
   contents: read
 
+env:
+  # FarnaHerry/HuxerUI farna/main: SDK 0.4.0 with TextField::TextStyles and TextParagraphLayout.
+  HUXERUI_FORK: FarnaHerry/HuxerUI
+  HUXERUI_REVISION: 062f3092863d0061f282dbfe761a474077732772
+  # Fixed demo signing certificate (SHA-256), committed at examples/editor/platform/android/keystore.
+  MARKDOWN_WRITER_CERT_SHA256: 33e1eecdcd0528a727481d956faa9d4b2276bf81f86c3017b2e675ab654bafa8
+
 jobs:
   writer:
     strategy:
@@ -23,19 +30,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Check out paragraph geometry SDK
+      - name: Check out pinned HuxerUI SDK
         uses: actions/checkout@v4
         with:
-          repository: FarnaHerry/HuxerUI
-          ref: 554d9a540b40fa5a7b51125218a80166c86d8679
+          repository: ${{ env.HUXERUI_FORK }}
+          ref: ${{ env.HUXERUI_REVISION }}
           path: .cache/HuxerUI
-      - name: Add attributed TextField support
-        shell: pwsh
-        run: |
-          git -C .cache/HuxerUI fetch --no-tags https://github.com/HuxerUI/HuxerUI.git e29c3c2573dcd7db201e7523ff59803529875d52
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git -C .cache/HuxerUI cherry-pick --no-commit e29c3c2573dcd7db201e7523ff59803529875d52
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -78,16 +78,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check out paragraph geometry SDK
+      - name: Check out pinned HuxerUI SDK
         uses: actions/checkout@v4
         with:
-          repository: FarnaHerry/HuxerUI
-          ref: 554d9a540b40fa5a7b51125218a80166c86d8679
+          repository: ${{ env.HUXERUI_FORK }}
+          ref: ${{ env.HUXERUI_REVISION }}
           path: .cache/HuxerUI
-      - name: Add attributed TextField support
-        run: |
-          git -C .cache/HuxerUI fetch --no-tags https://github.com/HuxerUI/HuxerUI.git e29c3c2573dcd7db201e7523ff59803529875d52
-          git -C .cache/HuxerUI cherry-pick --no-commit e29c3c2573dcd7db201e7523ff59803529875d52
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -97,23 +93,31 @@ jobs:
           sdk_manager=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)
           test -n "$sdk_manager"
           printf 'y\n%.0s' {1..100} | "$sdk_manager" --licenses
-          "$sdk_manager" --install 'platforms;android-36' 'ndk;29.0.14206865'
+          "$sdk_manager" --install 'platforms;android-36' 'build-tools;36.0.0' 'ndk;29.0.14206865'
       - name: Build HuxerUI CLI
         run: |
           cmake -S .cache/HuxerUI/tools/huxerui_cli -B build-huxerui-cli -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build-huxerui-cli --parallel 2
       - name: Select Android ABI
         run: sed -i 's/^huxeruiAbis=.*/huxeruiAbis=${{ matrix.abi }}/' examples/editor/platform/android/gradle.properties
-      - name: Package installable Android demo
+      - name: Package Android release
         working-directory: examples/editor
-        run: ../../build-huxerui-cli/huxerui package android --profile debug --source ../../.cache/HuxerUI
+        run: ../../build-huxerui-cli/huxerui package android --profile release --optimization minsize --lto on --source ../../.cache/HuxerUI
       - name: Stage APK
         run: |
-          apk=$(find examples/editor/dist/android -maxdepth 1 -name '*.apk' -print -quit)
-          test -n "$apk"
+          apk=examples/editor/dist/android/app-release.apk
+          test -f "$apk"
           actual_abis=$(unzip -Z1 "$apk" | sed -n 's|^lib/\([^/]*\)/.*\.so$|\1|p' | sort -u)
           test "$actual_abis" = '${{ matrix.abi }}'
           cp "$apk" 'markdown-writer-android-${{ matrix.abi }}.apk'
+      - name: Verify fixed APK signature
+        run: |
+          apksigner=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)
+          test -n "$apksigner"
+          fingerprint=$("$apksigner" verify --print-certs "markdown-writer-android-${{ matrix.abi }}.apk" \
+            | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+          echo "APK signer SHA-256: $fingerprint"
+          test "$fingerprint" = "$MARKDOWN_WRITER_CERT_SHA256"
       - uses: actions/upload-artifact@v4
         with:
           name: markdown-writer-android-${{ matrix.abi }}
