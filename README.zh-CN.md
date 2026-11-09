@@ -2,7 +2,7 @@
 
 [English](README.md) · HuxerUI 原生 Markdown 扩展，使用 C++20 和 MD4C。
 
-0.2 包含源代码不兼容的 API 调整，升级请参考 [迁移说明](docs/migration-0.2.md)。
+0.3 移除编辑相关 API，仅保留解析与只读渲染；升级请参考 [0.3 迁移说明](docs/migration-0.3.md)。
 
 支持 CommonMark 标题、段落、嵌套列表、引用、分隔线、代码块，以及 GFM
 表格、删除线、任务列表和自动链接。文本由 HuxerUI `AttributedText` 渲染，
@@ -109,7 +109,7 @@ return Markdown(document)
 `standalone_math_renderer` 可接入独占段落公式的自定义显示，混排行内公式仍为源码回退。
 `preserve_blank_lines = true` 保留 BlankLines/count，使用 `blank_line_height` 控制间距并保留
 正文间复制换行。两项默认关闭，不代表已完成公式排版或源码无损往返。
-详见 [公式、空行与编辑基础](docs/math-and-editing.md)。
+详见 [公式与空行](docs/math.md)。
 
 ## 配置
 
@@ -137,7 +137,7 @@ renderer 在 UI 组合时执行，节点引用仅在回调期间借用，延迟�
 `std::length_error`；无效 UTF-8 会抛出 `std::invalid_argument`。
 
 任务复选框只读；表格使用固定列宽并支持横向滚动；默认代码块为可换行的等宽文本。
-`MarkdownEditor` 提供源码权威的统一富文本事务，复杂结构可回退到块内或全文源码编辑。
+本库只负责渲染 Markdown，文本编辑由应用自行实现。
 数学排版、图表和 HTML 执行不在当前范围内。增量解析由独立会话提供。
 
 ## 交互 Demo
@@ -157,28 +157,13 @@ cmake --build build-preview --config Release --parallel
 
 Windows/Visual Studio 下运行 `build-preview/Release/markdown_preview.exe`，
 并保留旁边的 `markdown_preview.resources` 目录。CI 会提供 Windows demo artifact。
-
-第二个 [Markdown Writer](examples/editor/README.md) 位于 `examples/editor`，是类 Typora
-体验的实验版。公共 `MarkdownEditor` 对支持的富文本使用同一个源码权威的文档事务，
-支持跨段选区、IME、Enter/Backspace、Undo/Redo 和全篇源码选区回报。列表、引用及显式
-表格单元格共享输入会话；复杂结构仍使用经验证的块内或全文源码编辑。Writer 为每个标签
-保留独立历史。
-具体支持范围和后续任务见[块级编辑接口](docs/block-editing.md)和[后续记录](docs/editor-follow-up.md)。
-
-```powershell
-cmake -S examples/editor -B build-editor -DHUXERUI_HOME=/path/to/HuxerUI
-cmake --build build-editor --config Release --parallel
-.\build-editor\Release\markdown_editor.exe
-```
-
-根项目开启 examples 会同时构建两个 demo，Writer 输出为 `build/examples/editor/Release/markdown_editor.exe`。
+根项目开启 examples 只构建 preview demo。
 
 ## 构建
 
-需要 CMake 3.20+、C99/C++20 编译器，以及同时提供 `TextField::TextStyles` 和
-`TextMeasurer::LayoutText`/`TextParagraphLayout` 的 HuxerUI SDK 或源码。
-CI 固定使用 [`FarnaHerry/HuxerUI`](https://github.com/FarnaHerry/HuxerUI) 的 `farna/main` 提交
-`062f3092`（SDK 0.4.0，包含上述两项接口）。仅构建解析器不需要 HuxerUI。
+需要 CMake 3.20+、C99/C++20 编译器，以及 HuxerUI 0.4.0。
+CI 固定使用官方 [`HuxerUI/HuxerUI`](https://github.com/HuxerUI/HuxerUI) 提交 `36f93958`。
+仅构建解析器不需要 HuxerUI。
 
 ```sh
 cmake -S . -B build -DHUXERUI_HOME=/path/to/HuxerUI \

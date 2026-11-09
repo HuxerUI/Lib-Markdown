@@ -28,12 +28,12 @@ demo 的解析会话与流式会话使用相同的 `DemoParseOptions()`，显式
 不打开网址、不自动滚动。脚注定义存在时解析器保守回退全量解析，底部统计会如实显示。
 「公式与空行」默认打开自定义渲染，显示标明用途的 LaTeX 源码卡片；关闭后显示默认等宽源码。
 完整公式排版不在该卡片中实现。扩展样例中的 `||剧透||` 可独立点击揭示，复制仍包含正文。
-保持排版的直接编辑体验在 [Writer demo](../editor/README.md) 开发。
+本 demo 仅演示解析与只读渲染；文本编辑由应用自行实现。
 
-demo 使用 0.2 API：State 保存 `MarkdownDocument` 值，通过
+demo 使用当前 API：State 保存 `MarkdownDocument` 值，通过
 `.On<MarkdownEvents::LinkActivated>()` 处理链接，使用 `code_block_renderer` 和
-`standalone_image_renderer` 自定义显示。编辑与手动渲染保留滚动位置；切换或重置样例时使用
-demo 自己的版本号重置滚动。主题切换复用已有快照。升级请参考 [迁移说明](../../docs/migration-0.2.md)。
+`standalone_image_renderer` 自定义显示。手动渲染保留滚动位置；切换或重置样例时使用
+demo 自己的版本号重置滚动。主题切换复用已有快照。升级请参考 [0.3 迁移说明](../../docs/migration-0.3.md)。
 
 流式重放独立于编辑器的实时预览开关，重放所选样例而非当前草稿。开始时清空预览；停止保留
 已接收的完整 UTF-8 内容。编辑、手动渲染、切换或重置样例会停止重放；隐藏源码、主题切换和

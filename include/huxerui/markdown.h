@@ -6,7 +6,6 @@
 #include <utility>
 
 #include <huxerui/markdown/document.h>
-#include <huxerui/markdown/editing.h>
 #include <huxerui/theme.h>
 #include <huxerui/view.h>
 #include <huxerui/scroll.h>
@@ -146,38 +145,5 @@ struct MarkdownVirtualizationOptions {
                                      MarkdownVirtualizationOptions virtualization = {});
 [[nodiscard]] View VirtualizedMarkdown(std::string_view source, MarkdownOptions options = {},
                                      MarkdownVirtualizationOptions virtualization = {});
-
-/// Native source-backed Markdown editor. Rich mode shares one document selection,
-/// input session and undo/redo history across supported paragraphs and nested text.
-/// Empty or unsupported projections use the existing empty/source block fallback.
-struct MarkdownEditorOptions {
-  ParseOptions parse_options;
-  MarkdownOptions markdown_options;
-  MarkdownVirtualizationOptions virtualization;
-  /// Show a preview below source fallback/empty-source input. Rich editing renders
-  /// directly without a duplicate preview. Fragment previews have local reference scope.
-  bool live_preview = true;
-  /// Use one source-backed document transaction for rich editing, including cross-block
-  /// selection and undo/redo. False edits verified blocks as Markdown source instead.
-  bool rich_text = true;
-};
-
-struct MarkdownEditorEvents {
-  /// Full source plus UTF-16 selection/composition in whole-source coordinates.
-  /// Accept the complete value in the caller's controlled state, as for TextField.
-  struct Changed : Event<void(const TextEditingValue&)> {};
-  /// An edit was rejected; the last valid value is retained. Borrowed message.
-  struct Error : Event<void(const std::string&)> {};
-};
-
-/// Owns virtual scrolling and requires bounded height. Rich mode supports cross-block
-/// selection, editing and undo/redo with one input session. Changed reports
-/// whole-source UTF-16 selection/composition coordinates. External source replacement
-/// imports one undoable edit and remounts the input view without discarding history.
-/// An empty document presents one source field so writing can begin.
-[[nodiscard]] View MarkdownEditor(TextEditingValue value, MarkdownEditorOptions options = {});
-[[nodiscard]] inline View MarkdownEditor(const State<TextEditingValue>& value, MarkdownEditorOptions options = {}) {
-  return MarkdownEditor(value.Get(), std::move(options));
-}
 
 } // namespace huxerui::markdown

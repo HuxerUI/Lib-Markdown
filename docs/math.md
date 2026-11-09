@@ -1,7 +1,7 @@
-# 公式语法、空行与编辑基础
+# 公式语法与空行
 
-本阶段继续使用未修改的内置 MD4C。新增公式 AST 和独占公式渲染接入点、显式空行显示，
-以及供第二个 demo 使用的源码格式命令。未接入 TeX 排版引擎或完整富文本编辑器模型。
+本库使用未修改的内置 MD4C。提供公式 AST、独占公式渲染接入点与显式空行显示；
+不接入 TeX 排版引擎，也不提供编辑模型。
 
 ## 公式接入
 
@@ -40,32 +40,3 @@ PlainText 包含对应换行；普通/虚拟视图均使用逻辑选择分隔符
 
 增量重启仍只使用 MD4C 确认的未变标题/段落边界，新空白节点参与快照比较；含引用/脚注定义
 仍全量回退。新增测试按四种 math/空行配置进行 2,400 次随机编辑，并逐字节流式对照全量 AST。
-
-## 可复用格式命令
-
-```cpp
-// value 为 TextField 的完整受控值，选区单位是 UTF-16，不是解析会话的 UTF-8 字节。
-auto next = ApplyMarkdownCommand(value, MarkdownEditCommand::Bold);
-```
-
-该接口位于 `<huxerui/markdown/editing.h>`，也由主头引入；只在视图库构建中提供。
-操作是纯值转换，源对象保持不变，不进行解析、不更改焦点，也不管理历史。
-
-- Bold/Italic 包裹选区；空选区在空标记中间放置光标。不自动识别或撤销已有格式。
-- InlineCode 为包含反引号的内容选择更长定界符，并按需填充空格；拒绝多行选区。
-- Heading1/Heading2 替换现有 ATX 前缀；BulletList/BlockQuote 添加行前缀，同一前缀不重复添加。
-- 块命令处理选中行，末端恰在下一行起点时不包括下一行。保留 CRLF、选区方向和 affinity。
-- 无效 UTF-8、越界/拆开 surrogate 的选区、非法命令抛 invalid_argument。
-  活动 IME composition 抛 logic_error，调用方先完成组合输入。不会静默丢弃 provisional text。
-
-它是 Markdown 源码操作，不是所见即所得事务；不保证包裹任意复杂 Markdown 片段都能形成
-期望的嵌套格式。需要 AST 编辑、源码映射、撤销合并等能力时继续建设独立编辑层。
-
-## 两个 demo
-
-- [Playground](../examples/preview/README.md)：七组能力样例，新增公式/空行和源码渲染卡片。
-- [Writer](../examples/editor/README.md) 提供正文与表格单元格原位编辑、实时预览及全篇源码工具栏。
-
-两个 demo 都复用本库解析与渲染。Writer 使用库的 MarkdownEditor 与 MarkdownRichText，
-字形、光标和 IME 共用原生 attributed layout。
-具体边界见[块级编辑](block-editing.md)与[后续讨论](editor-follow-up.md)。

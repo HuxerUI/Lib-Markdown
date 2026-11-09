@@ -1,6 +1,4 @@
 #include <huxerui/markdown.h>
-#include <huxerui/animation.h>
-#include <huxerui/task.h>
 
 #include <algorithm>
 #include <cmath>
@@ -10,9 +8,6 @@
 #include <unordered_map>
 
 #include "inline.h"
-#include "editing_internal.h"
-#include "document_editor_internal.h"
-#include "discard.h"
 
 namespace huxerui::markdown {
 namespace {
@@ -164,12 +159,11 @@ bool HasSpoilers(const MarkdownNode& node) {
 
 class Renderer {
 public:
-  using TextEditor = std::function<std::optional<View>(const MarkdownNode&, TextStyle, TextAlign)>;
   Renderer(const MarkdownOptions& options, MarkdownStyle theme, EventEmitter events,
            const std::unordered_map<const MarkdownNode*, TextBlockId>* selection = nullptr,
-           bool interactive = true, TextEditor editor = {})
+           bool interactive = true)
       : options_(options), theme_(std::move(theme)), events_(std::move(events)), selection_(selection),
-        interactive_(interactive), editor_(std::move(editor)) {}
+        interactive_(interactive) {}
 
   View RenderBlock(const MarkdownNode& node) const { return Block(node); }
   View RenderInline(const MarkdownNode& node, TextStyle style, TextAlign alignment) const {
@@ -189,9 +183,6 @@ private:
   }
 
   View Paragraph(const MarkdownNode& node, TextStyle style, TextAlign alignment = TextAlign::Leading) const {
-    if (editor_) {
-      if (auto input = editor_(node, style, alignment)) return std::move(*input);
-    }
     if (node.kind == NodeKind::Paragraph && node.children.size() == 1) {
       const auto& child = node.children.front();
       if (options_.standalone_image_renderer && child.kind == NodeKind::Image)
@@ -356,7 +347,6 @@ private:
   EventEmitter events_;
   const std::unordered_map<const MarkdownNode*, TextBlockId>* selection_;
   bool interactive_;
-  TextEditor editor_;
 };
 
 // Owned block records avoid retaining an entire historical AST for each reused
@@ -368,8 +358,8 @@ struct VirtualBlock {
   std::vector<TextBlockId> ids;
   std::vector<TextSelectionBlock> paragraphs;
 
-  VirtualBlock(const MarkdownNode& value, std::uint64_t& next_id, std::optional<std::uint64_t> existing_id = {})
-      : node(value), id(existing_id ? *existing_id : ++next_id) {
+  VirtualBlock(const MarkdownNode& value, std::uint64_t& next_id)
+      : node(value), id(++next_id) {
     Collect(node, next_id);
   }
 
@@ -402,7 +392,7 @@ public:
   std::vector<std::shared_ptr<const VirtualBlock>> blocks;
 
   VirtualSnapshot(MarkdownDocument value, const std::shared_ptr<const VirtualSnapshot>& previous,
-                  std::uint64_t& next_id, std::optional<std::size_t> retained_row = {}) : document(std::move(value)) {
+                  std::uint64_t& next_id) : document(std::move(value)) {
     const auto& nodes = document.Root().children;
     blocks.resize(nodes.size());
     std::size_t prefix = 0, suffix = 0;
@@ -418,11 +408,8 @@ public:
         ++suffix;
       }
     }
-    for (auto i = prefix; i < nodes.size() - suffix; ++i) {
-      const auto id = previous && nodes.size() == previous->blocks.size() && retained_row == i
-          ? std::optional{previous->blocks[i]->id} : std::nullopt;
-      blocks[i] = std::make_shared<const VirtualBlock>(nodes[i], next_id, id);
-    }
+    for (auto i = prefix; i < nodes.size() - suffix; ++i)
+      blocks[i] = std::make_shared<const VirtualBlock>(nodes[i], next_id);
     for (const auto& block : blocks) {
       if (block->node.kind == NodeKind::BlankLines && !positions_.empty())
         positions_.back().separator.append(block->node.blank_line_count, '\n');
@@ -462,305 +449,6 @@ struct VirtualState {
   std::uint64_t next_id = 0;
 };
 
-struct EditingPresentation { using Value = bool; };
-
-bool EmptyForEditing(const MarkdownDocument& document) {
-  const auto& children = document.Root().children;
-  return std::all_of(children.begin(), children.end(), [](const MarkdownNode& node) { return node.kind == NodeKind::BlankLines; });
-}
-
-// The same TextField stays mounted while its presentation changes. In reading
-// presentation it is a transparent input backing beneath noninteractive Markdown;
-// a real pointer/Tab focus enters the client without synthetic input or a
-// second click. Exact glyph-to-source caret mapping is deliberately not promised.
-class EditableBlockLayout final : public Layout<EditableBlockLayout> {
-public:
-  using Layout::Layout;
-  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
-    auto& input = node.ChildAt(0);
-    auto& preview = node.ChildAt(1);
-    const bool editing = node.LayoutValueOr<EditingPresentation>(false);
-    const auto rendered = context.Measure(preview, constraints.LooseHeight());
-    const auto field = context.Measure(input, editing ? constraints.LooseHeight() :
-        constraints.LooseHeight().TightHeight(std::max(24.0F, rendered.height)));
-    LayoutResult result;
-    result.Place(input, {0, 0}).Place(preview, {0, editing ? field.height + node.Spacing() : 0});
-    return result.SetSize(constraints.Constrain({std::max(field.width, rendered.width),
-        editing ? field.height + node.Spacing() + rendered.height : std::max(field.height, rendered.height)}));
-  }
-};
-
-using NodePath = std::vector<std::size_t>;
-using EditablePaths = std::unordered_map<const MarkdownNode*, NodePath>;
-
-const MarkdownNode* NodeAt(const MarkdownNode& root, std::span<const std::size_t> path) {
-  const auto* node = &root;
-  for (const auto index : path) {
-    if (index >= node->children.size()) return nullptr;
-    node = &node->children[index];
-  }
-  return node;
-}
-
-bool CollectEditablePaths(const MarkdownDocument& document, std::string_view source, bool rich_text,
-                          const MarkdownNode& node, NodePath& path, EditablePaths& paths) {
-  if (node.kind == NodeKind::Paragraph || node.kind == NodeKind::Heading || detail::IsTableCell(node.kind)) {
-    const auto range = document.SourceRange(path);
-    if (!range) return false;
-    if (path.size() > 1 && source.substr(range->start_byte, range->end_byte - range->start_byte)
-                               .find_first_of("\r\n") != std::string_view::npos &&
-        (!rich_text || !MarkdownRichText::Supports(node) || PlainText(node).find_first_of("\r\n") != std::string::npos))
-      return false;
-    paths.emplace(&node, path);
-    return true;
-  }
-  if (node.kind == NodeKind::CodeBlock) return false;
-  if (node.kind == NodeKind::ListItem && std::all_of(node.children.begin(), node.children.end(),
-      [](const auto& child) { return child.kind == NodeKind::BlankLines; })) return false;
-  bool complete = true;
-  for (std::size_t i = 0; i < node.children.size(); ++i) {
-    path.push_back(i);
-    if (!CollectEditablePaths(document, source, rich_text, node.children[i], path, paths)) complete = false;
-    path.pop_back();
-  }
-  return complete;
-}
-
-bool FindEditPath(const MarkdownDocument& document, const MarkdownNode& node, NodePath& path,
-                  std::size_t start, NodeKind kind, bool nested) {
-  if (!path.empty() && node.kind == kind && (path.size() > 1) == nested) {
-    const auto range = document.SourceRange(path);
-    if (range && range->start_byte == start) return true;
-  }
-  if ((!nested && !path.empty()) || node.kind == NodeKind::Paragraph || node.kind == NodeKind::Heading ||
-      detail::IsTableCell(node.kind)) return false;
-  for (std::size_t i = 0; i < node.children.size(); ++i) {
-    path.push_back(i);
-    if (FindEditPath(document, node.children[i], path, start, kind, nested)) return true;
-    path.pop_back();
-  }
-  return false;
-}
-
-struct BlockEditorState {
-  ParseOptions parse_options;
-  MarkdownBlockEditSession session;
-  VirtualState layout;
-  MarkdownDocument fragment;
-  std::string fragment_text;
-  std::optional<MarkdownRichText> rich;
-  std::optional<std::size_t> retained_row;
-  bool rich_text;
-  std::uint64_t focus_epoch = 0;
-  bool empty_mode;
-  explicit BlockEditorState(const TextEditingValue& value, ParseOptions options, bool rich_enabled)
-      : parse_options(options), session(value.text, options), rich_text(rich_enabled), empty_mode(EmptyForEditing(session.Document())) {}
-
-  void EndEdit() {
-    if (rich && rich->Value().composition) throw std::logic_error("Finish IME composition before ending rich text editing");
-    const auto path = session.EditingPath();
-    const auto keep = path.size() > 1 && session.LayoutDocument() != session.Document()
-        ? std::optional{path.front()} : std::nullopt;
-    session.EndEdit();
-    if (keep) retained_row = keep;
-    rich.reset();
-  }
-
-  void UpdateEdit(const TextEditingValue& value) {
-    if (!rich) { session.UpdateEdit(value); return; }
-    auto candidate = *rich;
-    candidate.Update(value);
-    if (value.text != rich->Value().text || value.composition != rich->Value().composition)
-      session.UpdateEdit(candidate.SourceValue());
-    else {
-      try {
-        const auto mapped = candidate.SourceValue();
-        if (mapped.text == session.EditingValue().text) session.UpdateEdit(mapped);
-      } catch (const std::invalid_argument&) { /* Selection alone never normalizes source. */ }
-        catch (const std::length_error&) { /* Canonical spelling can exceed a tight source limit. */ }
-    }
-    rich = std::move(candidate);
-  }
-
-  bool IsActive(const MarkdownDocument& layout_document, std::span<const std::size_t> path) const {
-    return session.LayoutDocument() == layout_document && std::ranges::equal(session.EditingPath(), path);
-  }
-
-  bool Activate(const MarkdownDocument& layout_document, const NodePath& path) {
-    if (session.LayoutDocument() != layout_document) return false; // Stale realized row.
-    if (IsActive(layout_document, path)) return true;
-    const auto range = layout_document.SourceRange(path);
-    if (!range) return false;
-    auto start = range->start_byte;
-    if (const auto active = session.EditingPath(); !active.empty()) {
-      const auto old = *layout_document.SourceRange(active);
-      if (start >= old.end_byte)
-        start = start - (old.end_byte - old.start_byte) + session.EditingValue().text.size();
-      EndEdit();
-    }
-    const auto& document = session.Document();
-    const auto kind = NodeAt(layout_document.Root(), path)->kind;
-    auto target = path;
-    const auto* node = NodeAt(document.Root(), target);
-    const auto same_range = node && node->kind == kind ? document.SourceRange(target) : std::nullopt;
-    if (!same_range || same_range->start_byte != start) {
-      target.clear();
-      if (!FindEditPath(document, document.Root(), target, start, kind, path.size() > 1)) return false;
-      node = NodeAt(document.Root(), target);
-    }
-    std::optional<MarkdownRichText> projection;
-    if (rich_text && MarkdownRichText::Supports(*node))
-      projection = detail::RichProjection(*node, target.size() > 1, parse_options);
-    session.BeginEdit(target);
-    rich = std::move(projection);
-    ++focus_epoch;
-    return true;
-  }
-
-  TextEditingValue WholeValue() const {
-    auto result = TextEditingValue::FromText(std::string(session.Source()));
-    if (const auto path = session.EditingPath(); !path.empty()) {
-      const auto range = *session.LayoutDocument().SourceRange(path);
-      const auto prefix = AttributedText(std::string(session.Source().substr(0, range.start_byte))).Length();
-      const auto& local = session.EditingValue();
-      result.selection = {prefix + local.selection.anchor, prefix + local.selection.active, local.selection.affinity};
-      if (local.composition) result.composition = TextRange{prefix + local.composition->start, prefix + local.composition->end};
-    }
-    return result;
-  }
-};
-
-struct DocumentEditorState {
-  ParseOptions parse_options;
-  std::string attempted_source;
-  std::shared_ptr<rich_text::detail::EditSession> edit;
-  std::uint64_t generation = 0;
-};
-
-struct EditorRenderContext {
-  std::shared_ptr<BlockEditorState> state;
-  MarkdownDocument layout_document;
-  MarkdownOptions render_options;
-  MarkdownStyle theme;
-  EventEmitter events;
-  TaskScope tasks;
-  State<std::uint64_t> revision;
-  bool live_preview;
-};
-
-View EditableField(const EditorRenderContext& context, std::shared_ptr<const VirtualBlock> block,
-                   NodePath path, TextStyle base, TextAlign alignment) {
-  const auto range = *context.layout_document.SourceRange(path);
-  auto source = std::string(context.state->session.LayoutSource().substr(range.start_byte, range.end_byte - range.start_byte));
-  return Scope([context, block = std::move(block), path = std::move(path), base = std::move(base), alignment,
-                source = std::move(source)]() -> View {
-    const auto& [state, layout_document, render_options, theme, events, tasks, revision, live_preview] = context;
-    const auto report = [events](const std::exception& error) {
-      events.Emit<MarkdownEditorEvents::Error>(std::string(error.what()));
-    };
-    const auto& node = *NodeAt(block->node, std::span(path).subspan(1));
-    auto input_generation = UseState(std::uint64_t{0});
-    const auto generation = input_generation.Get();
-    const bool active = state->IsActive(layout_document, path);
-    auto local = active ? state->session.EditingValue() : TextEditingValue::FromText(source);
-    std::optional<MarkdownRichText> initial_projection;
-    if (!active && state->rich_text && MarkdownRichText::Supports(node))
-      initial_projection = detail::RichProjection(node, path.size() > 1, state->parse_options);
-    const auto& projection = active ? state->rich : initial_projection;
-    if (projection) local = projection->Value();
-    const bool table_cell = detail::IsTableCell(node.kind);
-    auto input = TextField(local).Variant(TextFieldVariant::Standard)
-        .LineLimits(TextFieldLineLimits::MultiLine(1))
-        .Align(alignment).VerticalAlign(TextVerticalAlign::Top)
-        .OnChanged([=](const TextEditingValue& next) mutable {
-          if (input_generation != generation) return;
-          bool activated = false;
-          try {
-            activated = state->Activate(layout_document, path);
-            if (!activated) return;
-            state->UpdateEdit(next);
-            const auto whole = state->WholeValue();
-            events.Emit<MarkdownEditorEvents::Changed>(whole);
-          } catch (const std::exception& error) {
-            // A rejected controlled proposal may still live in TextField's
-            // client. Retire that client rather than displaying text
-            // which was never accepted into the document.
-            input_generation = generation + 1;
-            if (activated) {
-              if (state->rich) {
-                auto accepted = state->rich->Value(); accepted.composition.reset(); state->rich->Update(accepted);
-              }
-              auto accepted = state->session.EditingValue(); accepted.composition.reset();
-              state->session.UpdateEdit(accepted);
-              const auto whole = state->WholeValue(); events.Emit<MarkdownEditorEvents::Changed>(whole);
-              state->EndEdit(); ++state->focus_epoch;
-            }
-            report(error);
-          }
-          ++revision;
-        }).On<ViewEvents::FocusChanged>([=](bool focused) mutable {
-          if (input_generation != generation) return;
-          try {
-            if (focused) {
-              state->Activate(layout_document, path);
-              ++revision;
-            } else if (state->IsActive(layout_document, path)) {
-              const auto epoch = state->focus_epoch;
-              // Defer closure so focus can first enter another backing field.
-              tasks.Post([=]() mutable {
-                if (state->focus_epoch != epoch || !state->session.EditingBlock() || state->session.EditingValue().composition) return;
-                try { state->EndEdit(); ++state->focus_epoch; ++revision; }
-                catch (const std::exception& error) { report(error); }
-              });
-            }
-          } catch (const std::exception& error) { report(error); }
-        }).On<ViewEvents::KeyIntercept>([=](const KeyEvent& event) mutable {
-          if (event.type != KeyEventType::Down || event.key != Key::Enter || (!table_cell && !event.modifiers.control) ||
-              state->session.EditingValue().composition) return false;
-          try {
-            state->EndEdit();
-            ++state->focus_epoch;
-            input_generation = generation + 1;
-            ++revision;
-          }
-          catch (const std::exception& error) { report(error); }
-          return true;
-        }).With(Opacity(active || projection ? 1.0F : 0.0F)).Key("markdown-block-input");
-    if (projection) {
-      input = std::move(input)
-          .TextStyles(detail::BuildEditableStyles(*projection, base, theme, render_options.link_policy))
-          .With(FontSize(base.font.Size()));
-      auto field_style = TextFieldStyle::Default();
-      field_style.text_style = base;
-      field_style.padding = {};
-      field_style.standard.minimum_height = 0;
-      field_style.border_width = field_style.focused_border_width = 0;
-      field_style.show_label = false;
-      field_style.caret = theme.link;
-      field_style.composition = theme.link;
-      ThemeDefinition field_theme;
-      field_theme.Set(field_style);
-      return Theme(std::move(field_theme), Scope([input = View(std::move(input))] { return input; }).Key(generation));
-    }
-    // Suppress link hit targets so the backing source field receives the click.
-    const auto renderer = Renderer(render_options, theme, events, nullptr, false);
-    View preview = table_cell ? renderer.RenderInline(node, base, alignment) : renderer.RenderBlock(node);
-    if (active) {
-      if (live_preview) {
-        auto fragment_options = state->parse_options;
-        fragment_options.source_ranges = false;
-        if (state->fragment_text != local.text || state->fragment == MarkdownDocument{}) {
-          state->fragment = ParseMarkdown(local.text, fragment_options);
-          state->fragment_text = local.text;
-        }
-        preview = renderer.Blocks(state->fragment.Root(), theme.block_spacing).Key("markdown-block-preview");
-      } else preview = Column(std::vector<View>{});
-    }
-    return EditableBlockLayout{Scope([input = View(std::move(input))] { return input; }).Key(generation), std::move(preview)}
-        .LayoutValue<EditingPresentation>(active).With(Spacing(active && live_preview ? 8.0F : 0.0F));
-  });
-}
-
 } // namespace
 
 namespace detail {
@@ -773,39 +461,6 @@ InlineResult BuildInline(const MarkdownNode& node, const MarkdownStyle& theme,
           std::move(builder.originals)};
 }
 
-std::vector<TextStyleRange> BuildEditableStyles(const MarkdownRichText& rich, const TextStyle& base,
-                                                const MarkdownStyle& theme, const MarkdownLinkPolicy& policy) {
-  std::vector<TextStyleRange> result;
-  for (const auto& run : rich.Runs()) {
-    TextSpanStyle style{.font = base.font, .foreground = base.foreground};
-    for (const auto& mark : run.marks) {
-      if (mark.kind == NodeKind::Link && !AllowsLinkDestination(mark.destination, policy)) continue;
-      ApplyInlineStyle(mark.kind, theme, style);
-    }
-    result.push_back({run.range, std::move(style)});
-  }
-  return result;
-}
-
-std::vector<std::vector<std::size_t>> DocumentEditablePaths(const MarkdownDocument& document, std::string_view source,
-                                                          std::size_t block) {
-  const auto& node = document.Root().children.at(block);
-  NodePath root{block};
-  EditablePaths paths;
-  CollectEditablePaths(document, source, true, node, root, paths);
-  std::vector<NodePath> ordered;
-  for (auto& [leaf, path] : paths) {
-    if (MarkdownRichText::Supports(*leaf)) ordered.push_back(std::move(path));
-  }
-  std::ranges::sort(ordered);
-  return ordered;
-}
-
-View RenderEditableBlock(const MarkdownNode& node, const MarkdownOptions& options, const MarkdownStyle& style,
-                         EventEmitter events,
-                         std::function<std::optional<View>(const MarkdownNode&, TextStyle, TextAlign)> editor) {
-  return Renderer(options, style, std::move(events), nullptr, false, std::move(editor)).RenderBlock(node);
-}
 } // namespace detail
 
 MarkdownStyle MarkdownStyle::FromTheme(const ThemeSpec& theme) {
@@ -893,157 +548,6 @@ View VirtualizedMarkdown(MarkdownDocument document, MarkdownOptions options,
     if (virtualization.scroll_controller) list = std::move(list).Controller(*virtualization.scroll_controller);
     if (options.selectable) return View(SelectionArea(std::move(list)).Source(snapshot));
     return View(std::move(list));
-  });
-}
-
-View detail::MarkdownBlockEditor(TextEditingValue value, MarkdownEditorOptions options) {
-  // Reuse TextField's UTF-8/scalar validation before mounting anything.
-  const AttributedText text(value.text);
-  LIB_MARKDOWN_DISCARD(text.TextInRange({0, value.selection.anchor}));
-  LIB_MARKDOWN_DISCARD(text.TextInRange({0, value.selection.active}));
-  if (value.composition) LIB_MARKDOWN_DISCARD(text.TextInRange(*value.composition));
-  if (value.selection.affinity != TextAffinity::Upstream && value.selection.affinity != TextAffinity::Downstream)
-    throw std::invalid_argument("Invalid Markdown editor selection affinity");
-  if (options.markdown_options.style) ValidateStyle(*options.markdown_options.style);
-  const auto& virtualization = options.virtualization;
-  if (!std::isfinite(virtualization.estimated_block_extent) || virtualization.estimated_block_extent <= 0 ||
-      !std::isfinite(virtualization.cache_extent) || virtualization.cache_extent < 0)
-    throw std::invalid_argument("Invalid Markdown editor virtualization extents");
-  return Scope([value = std::move(value), options = std::move(options)]() -> View {
-    const auto& virtualization = options.virtualization;
-    auto holder = UseState(std::shared_ptr<BlockEditorState>{});
-    if (!holder.Get() || holder.Get()->parse_options != options.parse_options || holder.Get()->rich_text != options.rich_text) {
-      if (holder.Get() && holder.Get()->session.EditingValue().composition)
-        throw std::logic_error("Finish IME composition before changing Markdown editor parsing options");
-      holder = std::make_shared<BlockEditorState>(value, options.parse_options, options.rich_text);
-    }
-    const auto state = holder.Get();
-    auto revision = UseState(std::uint64_t{0});
-    LIB_MARKDOWN_DISCARD(revision.Get());
-    const auto events = UseEvents();
-    const auto tasks = UseTaskScope();
-    if (state->session.Source() != value.text) {
-      state->session.UpdateSource(value.text);
-      state->rich.reset();
-      state->retained_row.reset();
-      ++state->focus_epoch;
-    }
-    auto theme = options.markdown_options.style ? *options.markdown_options.style : MarkdownStyle::FromTheme(UseTheme());
-    ValidateStyle(theme);
-    auto render_options = options.markdown_options;
-    render_options.selectable = false;
-    const auto report = [events](const std::exception& error) {
-      const std::string message = error.what();
-      events.Emit<MarkdownEditorEvents::Error>(message);
-    };
-    if (state->empty_mode || EmptyForEditing(state->session.Document())) {
-      state->empty_mode = true;
-      View input = TextField(value).LineLimits(TextFieldLineLimits::MultiLine(1)).VerticalAlign(TextVerticalAlign::Top)
-          .OnChanged([=](const TextEditingValue& next) mutable {
-            try {
-              state->session.UpdateSource(next.text);
-              events.Emit<MarkdownEditorEvents::Changed>(next);
-              ++revision;
-            } catch (const std::exception& error) { report(error); }
-          }).On<ViewEvents::FocusChanged>([=](bool focused) mutable {
-            if (!focused && !EmptyForEditing(state->session.Document())) {
-              tasks.Post([=]() mutable { state->empty_mode = false; ++revision; });
-            }
-          }).Key("markdown-empty-input");
-      return ScrollView(Column{
-        std::move(input),
-        options.live_preview ? Renderer(render_options, theme, events, nullptr, false)
-            .Blocks(state->session.Document().Root(), theme.block_spacing).Key("markdown-block-preview") :
-            View(Column(std::vector<View>{})),
-      }.With(Spacing(8.0F), CrossAlign(CrossAxisAlignment::Stretch)));
-    }
-    const auto layout_document = state->session.LayoutDocument();
-    if (!state->layout.snapshot || state->layout.snapshot->document != layout_document)
-      state->layout.snapshot = std::make_shared<const VirtualSnapshot>(layout_document, state->layout.snapshot,
-          state->layout.next_id, std::exchange(state->retained_row, std::nullopt));
-    const auto snapshot = state->layout.snapshot;
-    const EditorRenderContext editor{state, layout_document, render_options, theme, events, tasks, revision, options.live_preview};
-    auto list = VirtualList(snapshot->blocks.size(), [=](std::size_t index) -> View {
-      const auto block = snapshot->blocks[index];
-      return Scope([=]() -> View {
-        LIB_MARKDOWN_DISCARD(revision.Get());
-        const auto field = [&](const NodePath& path, TextStyle base, TextAlign alignment) {
-          return EditableField(editor, block, path, std::move(base), alignment);
-        };
-        if (state->session.LayoutDocument() != layout_document)
-          return Renderer(render_options, theme, events).RenderBlock(block->node);
-        NodePath path{index};
-        EditablePaths paths;
-        const bool complete = CollectEditablePaths(layout_document, state->session.LayoutSource(), options.rich_text,
-            block->node, path, paths);
-        if ((!options.rich_text || !complete || paths.empty()) && layout_document.TopLevelSourceRange(index))
-          return field(path, theme.body, TextAlign::Leading);
-        return Renderer(render_options, theme, events, nullptr, true,
-            [&](const MarkdownNode& node, TextStyle base, TextAlign alignment) -> std::optional<View> {
-              const auto found = paths.find(&node);
-              if (found == paths.end()) return std::nullopt;
-              return field(found->second, std::move(base), alignment);
-            }).RenderBlock(block->node);
-      }).With(Frame{.min_height = 0.001F}, Padding(EdgeInsets{0, 0, index + 1 < snapshot->blocks.size() ?
-          BlockGap(block->node, snapshot->blocks[index + 1]->node, theme.block_spacing) : 0, 0})).Key(block->id);
-    }).EstimatedItemExtent(virtualization.estimated_block_extent).CacheExtent(virtualization.cache_extent);
-    if (virtualization.scroll_controller) list = std::move(list).Controller(*virtualization.scroll_controller);
-    return View(std::move(list));
-  });
-}
-
-View MarkdownEditor(TextEditingValue value, MarkdownEditorOptions options) {
-  if (!options.rich_text) return detail::MarkdownBlockEditor(std::move(value), std::move(options));
-  const AttributedText text(value.text);
-  LIB_MARKDOWN_DISCARD(text.TextInRange({0, value.selection.anchor}));
-  LIB_MARKDOWN_DISCARD(text.TextInRange({0, value.selection.active}));
-  if (value.composition) LIB_MARKDOWN_DISCARD(text.TextInRange(*value.composition));
-  if (value.selection.affinity != TextAffinity::Upstream && value.selection.affinity != TextAffinity::Downstream)
-    throw std::invalid_argument("Invalid Markdown editor selection affinity");
-  if (options.markdown_options.style) ValidateStyle(*options.markdown_options.style);
-  const auto& virtualization = options.virtualization;
-  if (!std::isfinite(virtualization.estimated_block_extent) || virtualization.estimated_block_extent <= 0 ||
-      !std::isfinite(virtualization.cache_extent) || virtualization.cache_extent < 0)
-    throw std::invalid_argument("Invalid Markdown editor virtualization extents");
-  return Scope([value = std::move(value), options = std::move(options)]() mutable -> View {
-    auto holder = UseState(std::shared_ptr<DocumentEditorState>{});
-    auto state = holder.Get();
-    if (!state || state->parse_options != options.parse_options) {
-      if (state && state->edit && state->edit->Composition())
-        throw std::logic_error("Finish IME composition before changing Markdown editor parsing options");
-      const auto generation = state ? state->generation + 1 : 0;
-      state = std::make_shared<DocumentEditorState>();
-      state->parse_options = options.parse_options;
-      state->generation = generation;
-      holder = state;
-    }
-    if (state->edit && detail::EditableMarkdownSource(state->edit->Current().document) != value.text) {
-      try {
-        state->edit->Import(detail::EditableMarkdownDocument(value.text, options.parse_options));
-        ++state->generation;
-      } catch (const std::invalid_argument&) {
-        state->edit.reset();
-        state->attempted_source = value.text;
-      }
-    }
-    if (!state->edit && state->attempted_source != value.text) {
-      state->attempted_source = value.text;
-      try {
-        state->edit = std::make_shared<rich_text::detail::EditSession>(
-            detail::EditableMarkdownDocument(value.text, options.parse_options));
-      } catch (const std::invalid_argument&) {
-        // The block path supports empty source and structures without a document projection.
-      }
-    }
-    if (!state->edit) return detail::MarkdownBlockEditor(value, options);
-    const auto events = UseEvents();
-    return detail::MarkdownDocumentEditor(state->edit, options,
-        [events](const TextEditingValue& next) mutable {
-          events.Emit<MarkdownEditorEvents::Changed>(next);
-        },
-        [events](std::string_view error) mutable {
-          events.Emit<MarkdownEditorEvents::Error>(std::string(error));
-        }).Key("markdown-document-" + std::to_string(state->generation));
   });
 }
 

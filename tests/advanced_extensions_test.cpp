@@ -38,7 +38,6 @@ int main() { return Run([] {
     options.collapse_whitespace = variant & 1;
     options.permissive_atx_headings = variant & 2;
     options.indented_code_blocks = !(variant & 4);
-    options.source_ranges = true;
     MarkdownParseSession parser(options);
     std::string text = "# title\n\nbefore ||secret||\n\nlast\n";
     for (int n = 0; n < 100; ++n) {

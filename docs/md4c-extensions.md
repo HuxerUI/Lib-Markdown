@@ -70,7 +70,7 @@ parse.collapse_whitespace = true;
 `spoilers=true` 识别 `||text||` 并生成 Spoiler 节点。普通/虚拟视图使用 `MarkdownStyle::spoiler_cover`
 遮盖，点击、键盘链接激活或辅助功能 Activate 可独立揭示；揭示后内部链接恢复正常事件。
 揭示状态保存在挂载段落中，内容变化或卸载后重置。复制和辅助功能仍可读取正文；这是视觉隐藏。
-包含剧透的 Writer 段落暂使用源码回退，普通 Playground 的扩展样例可验证阅读揭示。
+包含剧透的段落默认遮盖，普通/虚拟预览样例可验证阅读揭示。
 
 ## 六项扩展的显示与交互
 
@@ -141,9 +141,7 @@ return Markdown(document)
 | HTML 输出/执行 | 不在原生控件范围；不因扩展语法而开启 |
 
 MD4C 的 syntax 字段是保留字段，不是语法插件接口。未来自定义语法另行设计，保持第三方代码
-与应用扩展层分离。[Writer demo](../examples/editor/README.md) 支持正文与表格单元格保持排版直接编辑，
-保守源码区间、语义格式模型和统一文档事务均在库层实现。
-见[块级编辑](block-editing.md)和[后续讨论](editor-follow-up.md)。
+与应用扩展层分离。本库只提供解析与只读渲染，不包含编辑事务或源码编辑模型。
 
 ## 验证
 

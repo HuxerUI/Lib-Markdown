@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0 (2026-11-09)
+
+- Trim the library to Markdown parsing plus read-only rendering. Remove
+  `MarkdownEditor`, `editing.h`, `MarkdownRichText`, `MarkdownBlockEditSession`,
+  `ApplyMarkdownCommand` and document source-range APIs.
+- Delete the Writer demo (`examples/editor`), the rich-text editor experiment,
+  Android/Linux Writer packaging, and the Writer release workflow.
+- Depend on official HuxerUI 0.4.0; the fork-only `TextField::TextStyles` and
+  `TextParagraphLayout` requirements are gone.
+- This is a source-breaking release; see `docs/migration-0.3.md`.
+
 ## 0.2.4 (2026-11-08)
 
 - Prevent caret reveal from overriding deliberate scrolling in the document editor.

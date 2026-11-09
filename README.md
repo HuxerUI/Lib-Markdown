@@ -2,7 +2,8 @@
 
 [简体中文](README.zh-CN.md)
 
-The 0.2 API includes source-breaking changes. See the [migration guide](docs/migration-0.2.md).
+The 0.3 API removes the editing surface and keeps parsing plus read-only rendering.
+See the [migration guide](docs/migration-0.3.md).
 
 Native Markdown content for [HuxerUI](https://github.com/HuxerUI/HuxerUI), with a
 CommonMark parser, configurable GFM extensions, and ordinary declarative views.
@@ -19,8 +20,7 @@ CommonMark parser, configurable GFM extensions, and ordinary declarative views.
 - Immutable documents that can be parsed on a worker and reused across recompositions
 - Stateful incremental parsing with UTF-8 edits, safe prefix reuse and parse statistics
 - Arbitrary-byte UTF-8 streaming and optional measured top-level block virtualization
-- Verified source ranges, block edit sessions and a virtualized native MarkdownEditor
-- Direct editing of attributed paragraphs, headings, list/quote text and explicit table cells
+- Read-only rendering only; source editing and rich-text editing are not part of this library
 - Click-to-reveal spoilers, separate URL/email/WWW autolinks and explicit syntax presets
 - Vendored MIT-licensed MD4C; no runtime download, WebView, JavaScript, or HTML rendering
 
@@ -141,7 +141,7 @@ the default is monospace source, not formula typesetting. A
 mixed inline formulas retain the source fallback. `preserve_blank_lines` emits
 BlankLines/count nodes with configurable `MarkdownStyle::blank_line_height` and
 interior selection separators. Both options default to off. See
-[math, blank lines and editing contracts](docs/math-and-editing.md).
+[math and blank-line contracts](docs/math.md).
 
 ## Streaming input
 
@@ -252,30 +252,13 @@ cmake --build build-preview --config Release --parallel
 With Visual Studio, launch `build-preview/Release/markdown_preview.exe`; keep its
 `markdown_preview.resources` directory alongside it. CI publishes a Windows demo
 artifact after its standalone build and interaction tests pass.
-
-The separate [Markdown Writer](examples/editor/README.md) is the experimental
-Typora-inspired editing demo. The public `MarkdownEditor` now uses one source-backed
-document transaction for supported rich text, including cross-block selection, IME,
-Enter/Backspace and undo/redo with whole-source selection reporting. Nested lists,
-quotes and explicit table cells share the same session; complex structures still use
-verified block or full-source editing. Writer retains an independent history per tab.
-See [block editing](docs/block-editing.md) and [the follow-up plan](docs/editor-follow-up.md).
-
-```sh
-cmake -S examples/editor -B build-editor -DHUXERUI_HOME=/path/to/HuxerUI
-cmake --build build-editor --config Release --parallel
-```
-
-With Visual Studio, run `build-editor/Release/markdown_editor.exe` with its sibling
-resource directory. A root build with examples enabled builds both demos.
+A root build with examples enabled builds the preview demo.
 
 ## Build and test
 
-Requires CMake 3.20+, a C99/C++20 toolchain, and HuxerUI with both
-`TextField::TextStyles` and `TextMeasurer::LayoutText`/`TextParagraphLayout`.
-CI pins [`FarnaHerry/HuxerUI`](https://github.com/FarnaHerry/HuxerUI) `farna/main` at
-`062f3092` (SDK 0.4.0 plus both paragraph APIs). Parser-only builds need no HuxerUI
-dependency.
+Requires CMake 3.20+, a C99/C++20 toolchain, and HuxerUI 0.4.0. CI pins the official
+[`HuxerUI/HuxerUI`](https://github.com/HuxerUI/HuxerUI) commit `36f93958`.
+Parser-only builds need no HuxerUI dependency.
 
 ```sh
 cmake -S . -B build -DHUXERUI_HOME=/path/to/HuxerUI \
@@ -312,8 +295,8 @@ Task checkboxes are presentation only. Code blocks use wrapped monospace text by
 default; provide a renderer for highlighting or different scrolling. Table columns
 have a configurable fixed width, with per-cell wrapping and GFM alignment.
 Mathematical typesetting, diagrams and HTML execution are outside this version.
-`MarkdownEditor` provides source-backed rich editing, with block/source fallback for
-unsupported structures. Virtualization operates at top-level blocks; streaming uses ordinary
+The library renders Markdown; text editing is application-owned.
+Virtualization operates at top-level blocks; streaming uses ordinary
 Markdown semantics without inventing a partial-input grammar.
 
 ## License

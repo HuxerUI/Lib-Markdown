@@ -4,17 +4,12 @@
 #include <functional>
 #include <memory>
 #include <optional>
-#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 namespace huxerui::markdown {
-
-namespace detail {
-class MarkdownDocumentEditSession;
-}
 
 /// CommonMark/GFM syntax kinds; Code is inline code, CodeBlock is block content.
 enum class NodeKind {
@@ -76,13 +71,6 @@ enum class SoftBreakMode {
   LineBreak,
 };
 
-/// Half-open UTF-8 byte range in the exact source used to create a snapshot.
-struct MarkdownSourceRange {
-  std::size_t start_byte = 0;
-  std::size_t end_byte = 0;
-  bool operator==(const MarkdownSourceRange&) const = default;
-};
-
 /// Bare-text autolinks only; explicit Markdown links and <angle autolinks> are
 /// parsed independently. Defaults preserve the library's previous behavior.
 struct MarkdownAutolinkOptions {
@@ -110,9 +98,6 @@ struct ParseOptions {
   bool math = false;
   /// Emit BlankLines nodes for runs reported by MD4C; not lossless source retention.
   bool preserve_blank_lines = false;
-  /// Collect source coordinates for editing. Container boundaries may require
-  /// fragment verification; unavailable or synthesized nodes have no range.
-  bool source_ranges = false;
   bool spoilers = false; ///< ||hidden text||; visual concealment, not data protection.
   bool collapse_whitespace = false; ///< Collapse nontrivial ordinary whitespace; code remains literal.
   bool permissive_atx_headings = false; ///< Accept #heading without a separating space.
@@ -150,15 +135,6 @@ public:
   [[nodiscard]] const MarkdownNode& Root() const noexcept;
   /// Returns owned UTF-8 text without markup.
   [[nodiscard]] std::string PlainText() const;
-  /// Optional source interval including block markers, excluding the final EOL.
-  /// Collected when source_ranges is enabled. Indices address Root().children;
-  /// invalid indices throw.
-  [[nodiscard]] std::optional<MarkdownSourceRange> TopLevelSourceRange(std::size_t index) const;
-  /// Child indices from Root() to an editable node. A nested paragraph,
-  /// single-line heading, or explicit table cell starts at its inline Markdown.
-  /// A multi-line paragraph can include interior prefixes and line breaks.
-  /// Synthesized cells and the root have no range. Invalid paths throw.
-  [[nodiscard]] std::optional<MarkdownSourceRange> SourceRange(std::span<const std::size_t> path) const;
   /// Snapshot identity equality; separately parsed equivalent ASTs need not be equal.
   bool operator==(const MarkdownDocument&) const noexcept = default;
 
@@ -181,8 +157,7 @@ private:
 enum class MarkdownParseMode { Unchanged, Incremental, Full };
 
 /// Primary document parse work for one update, not total CPU/memory work.
-/// Optional source-range fragment verification, source validation/comparison and
-/// copying retained AST blocks are separate from parsed_bytes.
+/// Source validation/comparison and copying retained AST blocks are separate from parsed_bytes.
 struct MarkdownParseStats {
   MarkdownParseMode mode = MarkdownParseMode::Unchanged;
   std::size_t parsed_bytes = 0;
@@ -237,8 +212,6 @@ private:
   explicit MarkdownParseSession(const Impl& snapshot);
   [[nodiscard]] MarkdownParseSession Fork() const;
   std::unique_ptr<Impl> impl_;
-  friend class MarkdownBlockEditSession;
-  friend class detail::MarkdownDocumentEditSession;
 };
 
 /// Synchronous incremental Markdown input accepting arbitrary UTF-8 byte chunks.

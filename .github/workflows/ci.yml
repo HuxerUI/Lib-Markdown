@@ -9,9 +9,9 @@ permissions:
   contents: read
 
 env:
-  # FarnaHerry/HuxerUI farna/main: SDK 0.4.0 with TextField::TextStyles and TextParagraphLayout.
-  HUXERUI_FORK: FarnaHerry/HuxerUI
-  HUXERUI_REVISION: 062f3092863d0061f282dbfe761a474077732772
+  # Official HuxerUI 0.4.0 (main branch commit; no v0.4.0 tag yet).
+  HUXERUI_REPOSITORY: HuxerUI/HuxerUI
+  HUXERUI_REVISION: 36f93958ea368c38d9361cc7dc2c2cbe3a4b5892
 
 jobs:
   parser:
@@ -41,16 +41,13 @@ jobs:
           - name: preview
             source: examples/preview
             options: -DHUXERUI_MARKDOWN_PREVIEW_BUILD_TESTS=ON
-          - name: editor
-            source: examples/editor
-            options: -DHUXERUI_MARKDOWN_EDITOR_BUILD_TESTS=ON -DHUXERUI_MARKDOWN_EDITOR_DOCUMENT_MODE=ON
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - name: Check out pinned HuxerUI SDK
         uses: actions/checkout@v4
         with:
-          repository: ${{ env.HUXERUI_FORK }}
+          repository: ${{ env.HUXERUI_REPOSITORY }}
           ref: ${{ env.HUXERUI_REVISION }}
           path: .cache/HuxerUI
       - name: Configure ${{ matrix.name }} independently
@@ -68,29 +65,3 @@ jobs:
           path: |
             build/Release/markdown_${{ matrix.name }}.exe
             build/Release/markdown_${{ matrix.name }}.resources/
-
-  rich-text-editor:
-    name: native (rich text editor prototype)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Check out pinned HuxerUI SDK
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.HUXERUI_FORK }}
-          ref: ${{ env.HUXERUI_REVISION }}
-          path: .cache/paragraph-layout-sdk
-      - name: Configure
-        run: cmake -S experiments/rich_text_editor -B build -DHUXERUI_HOME="${{ github.workspace }}/.cache/paragraph-layout-sdk" -DHUXERUI_BUILD_TESTING_LIBRARY=ON
-      - name: Build
-        run: cmake --build build --config Release --parallel 2
-      - name: Test
-        run: ctest --test-dir build -C Release --output-on-failure
-      - name: Upload Windows demo
-        uses: actions/upload-artifact@v4
-        with:
-          name: rich-text-editor-windows
-          if-no-files-found: error
-          path: |
-            build/Release/rich_text_editor_demo.exe
-            build/Release/rich_text_editor_demo.resources/

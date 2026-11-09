@@ -154,12 +154,9 @@ Six optional MD4C extensions add AST kinds/fields, styles, an admonition rendere
 and typed Wiki/footnote events; see [the extension contract](md4c-extensions.md).
 NodeKind numeric values are not a serialization ABI. Rebuild all consumers and
 update exhaustive node visitors; no compatibility aliases are provided.
-Additional opt-in math/blank-line support and UTF-16 source format commands are
-documented in [math and editing](math-and-editing.md). The separate Writer demo
-now uses MarkdownEditor/MarkdownRichText for direct attributed paragraph/heading
-editing, with source fallback for unsupported inline structures. This requires
-HuxerUI TextField::TextStyles. See [block editing](block-editing.md) for source
-normalization, controlled coordinates and current structure/history limitations.
+Additional opt-in math/blank-line support is documented in
+[math and blank lines](math.md). The 0.2 source-format commands and Writer editing
+demo were removed in 0.3; see the [0.3 migration guide](migration-0.3.md).
 
 `ParseOptions::autolinks` is now `MarkdownAutolinkOptions{urls, emails, www}`.
 Replace `.autolinks = false` with `.autolinks = {false, false, false}`; explicit
