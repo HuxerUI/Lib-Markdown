@@ -257,7 +257,7 @@ A root build with examples enabled builds the preview demo.
 ## Build and test
 
 Requires CMake 3.20+, a C99/C++20 toolchain, and HuxerUI 0.4.0. CI pins the official
-[`HuxerUI/HuxerUI`](https://github.com/HuxerUI/HuxerUI) commit `36f93958`.
+[`HuxerUI/HuxerUI`](https://github.com/HuxerUI/HuxerUI) commit `8d2bcea1`.
 Parser-only builds need no HuxerUI dependency.
 
 ```sh

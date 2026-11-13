@@ -162,7 +162,7 @@ Windows/Visual Studio 下运行 `build-preview/Release/markdown_preview.exe`，
 ## 构建
 
 需要 CMake 3.20+、C99/C++20 编译器，以及 HuxerUI 0.4.0。
-CI 固定使用官方 [`HuxerUI/HuxerUI`](https://github.com/HuxerUI/HuxerUI) 提交 `36f93958`。
+CI 固定使用官方 [`HuxerUI/HuxerUI`](https://github.com/HuxerUI/HuxerUI) 提交 `8d2bcea1`。
 仅构建解析器不需要 HuxerUI。
 
 ```sh

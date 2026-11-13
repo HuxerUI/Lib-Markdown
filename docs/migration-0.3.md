@@ -40,7 +40,7 @@
 ## 版本与依赖
 
 - 本库版本：`0.3.0`
-- CI 固定官方 `HuxerUI/HuxerUI` 提交 `36f93958`（0.4.0）
+- CI 固定官方 `HuxerUI/HuxerUI` 提交 `8d2bcea1`（0.4.0）
 - 解析器单独构建：`-DHUXERUI_MARKDOWN_BUILD_VIEW=OFF`
 
 历史 0.2 迁移说明仍保留在 [migration-0.2.md](migration-0.2.md)。

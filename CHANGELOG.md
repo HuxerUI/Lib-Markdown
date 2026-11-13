@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Track official HuxerUI main commit `8d2bcea1` (0.4.0 development line; no
+  v0.4.0 tag yet). Parser and view tests pass against it unchanged.
+
 ## 0.3.0 (2026-11-09)
 
 - Trim the library to Markdown parsing plus read-only rendering. Remove
