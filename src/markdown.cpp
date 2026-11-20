@@ -55,13 +55,23 @@ struct InlineBuilder {
   std::vector<TextStyleRange> styles;
   std::vector<TextLinkRange> links;
   std::vector<detail::OriginalLink> originals;
+  std::vector<MarkdownSourceSegment> source_segments;
   TextOffset length = 0;
   const std::set<unsigned>* revealed_spoilers = nullptr;
+  bool collect_source = false;
   unsigned spoiler_index = 0;
   unsigned concealed_depth = 0;
 
-  void Append(const std::string& value, const TextSpanStyle& style) {
+  void Append(const std::string& value, const TextSpanStyle& style,
+              std::span<const MarkdownSourceSegment> segments = {}) {
     if (value.empty()) return;
+    if (collect_source) {
+      for (auto segment : segments) {
+        segment.text_begin += text.size();
+        segment.text_end += text.size();
+        source_segments.push_back(segment);
+      }
+    }
     const auto begin = length;
     length += AttributedText(value).Length();
     text += value;
@@ -78,7 +88,7 @@ struct InlineBuilder {
       const bool concealed = !revealed_spoilers || !revealed_spoilers->contains(index);
       const bool outer = concealed_depth == 0;
       if (concealed) ++concealed_depth;
-      Append(node.text, style);
+      Append(node.text, style, node.source_segments);
       for (const auto& child : node.children) Visit(child, style);
       if (concealed) --concealed_depth;
       if (concealed && outer && length > begin) {
@@ -89,7 +99,10 @@ struct InlineBuilder {
     }
     case NodeKind::Image:
       style.foreground = theme.muted;
-      Append(PlainText(node), style);
+      if (collect_source) {
+        const auto alt = PlainTextWithSource(node);
+        Append(alt.text, style, alt.source_segments);
+      } else Append(PlainText(node), style);
       return;
     case NodeKind::WikiLink:
     case NodeKind::FootnoteReference:
@@ -98,7 +111,7 @@ struct InlineBuilder {
           (node.kind != NodeKind::Link || AllowsLinkDestination(node.destination, policy));
       const auto begin = length;
       if (allowed) ApplyInlineStyle(node.kind, theme, style);
-      Append(node.text, style);
+      Append(node.text, style, node.source_segments);
       for (const auto& child : node.children) Visit(child, style);
       if (allowed && length > begin) {
         auto uri = node.kind == NodeKind::Link ? Uri::Parse(node.destination) : std::optional<Uri>{};
@@ -113,7 +126,7 @@ struct InlineBuilder {
     }
     default: ApplyInlineStyle(node.kind, theme, style); break;
     }
-    Append(node.text, style);
+    Append(node.text, style, node.source_segments);
     for (const auto& child : node.children) Visit(child, style);
   }
 };
@@ -192,20 +205,20 @@ private:
     }
     if (HasSpoilers(node)) {
       const auto selection_id = selection_ ? std::optional<TextBlockId>{selection_->at(&node)} : std::nullopt;
-      return Scope([owned = node, style, alignment, theme = theme_, policy = options_.link_policy,
+      return Scope([owned = node, style, alignment, theme = theme_, policy = options_.link_policy, decorate = options_.decorate_text,
                     events = events_, interactive = interactive_, selection_id]() -> View {
         auto revealed = UseState(std::set<unsigned>{});
         auto previous = UseState(owned);
         if (previous != owned) { previous = owned; revealed = std::set<unsigned>{}; }
-        auto content = detail::BuildInline(owned, theme, policy, &revealed.Get());
+        auto content = detail::BuildInline(owned, theme, policy, &revealed.Get(), static_cast<bool>(decorate));
         auto attributed = content.text;
         if (!interactive) {
           const auto ranges = attributed.StyleRanges();
           attributed = AttributedText::FromRanges(attributed.PlainText(), {ranges.begin(), ranges.end()});
         }
-        auto text = Text(std::move(attributed)).Style(style).Align(alignment);
+        auto text = Text(attributed).Style(style).Align(alignment);
         if (selection_id) text = std::move(text).SelectionBlock(*selection_id);
-        return std::move(text).On<TextEvents::LinkActivated>([revealed, events, links = std::move(content.links)](const TextLinkActivation& event) mutable {
+        auto view = std::move(text).On<TextEvents::LinkActivated>([revealed, events, links = std::move(content.links)](const TextLinkActivation& event) mutable {
           for (const auto& link : links) {
             if (link.range != event.range) continue;
             if (link.kind == NodeKind::Spoiler) {
@@ -217,15 +230,19 @@ private:
             return;
           }
         });
+        if (decorate) return decorate(std::move(view), owned, attributed, style, alignment, content.source_segments);
+        return view;
       });
     }
-    auto inline_text = detail::BuildInline(node, theme_, options_.link_policy);
+    auto inline_text = detail::BuildInline(node, theme_, options_.link_policy, nullptr, static_cast<bool>(options_.decorate_text));
     if (!interactive_) {
       const auto styles = inline_text.text.StyleRanges();
-      auto text = AttributedText::FromRanges(inline_text.text.PlainText(), {styles.begin(), styles.end()});
-      return Text(std::move(text)).Style(std::move(style)).Align(alignment);
+      inline_text.text = AttributedText::FromRanges(inline_text.text.PlainText(), {styles.begin(), styles.end()});
+      auto view = Text(inline_text.text).Style(style).Align(alignment);
+      if (options_.decorate_text) return options_.decorate_text(std::move(view), node, inline_text.text, style, alignment, inline_text.source_segments);
+      return view;
     }
-    return BindSelection(Text(std::move(inline_text.text)).Style(std::move(style)).Align(alignment), node)
+    auto view = BindSelection(Text(inline_text.text).Style(style).Align(alignment), node)
         .On<TextEvents::LinkActivated>([events = events_, links = std::move(inline_text.links)](const TextLinkActivation& event) {
           for (const auto& link : links) {
             if (link.range == event.range) {
@@ -241,6 +258,8 @@ private:
             }
           }
         });
+    if (options_.decorate_text) return options_.decorate_text(std::move(view), node, inline_text.text, style, alignment, inline_text.source_segments);
+    return view;
   }
 
   View List(const MarkdownNode& node) const {
@@ -297,10 +316,15 @@ private:
       if (!std::isfinite(height)) throw std::invalid_argument("Markdown blank line extent overflow");
       return Column(std::vector<View>{}).With(Frame{.height = height});
     }
-    case NodeKind::CodeBlock:
+    case NodeKind::CodeBlock: {
       if (options_.code_block_renderer) return options_.code_block_renderer(node);
-      return BindSelection(Text(node.text).Style(theme_.code), node)
+      const auto text = AttributedText(node.text);
+      auto view = BindSelection(Text(text).Style(theme_.code), node)
           .With(Padding(theme_.code_padding), Background{theme_.code_background}, CornerRadius(theme_.corner_radius));
+      if (options_.decorate_text)
+        return options_.decorate_text(std::move(view), node, text, theme_.code, TextAlign::Leading, node.source_segments);
+      return view;
+    }
     case NodeKind::BlockQuote:
       return Blocks(node, theme_.block_spacing)
           .With(Padding(EdgeInsets{8.0F, 8.0F, 8.0F, theme_.indent}),
@@ -453,12 +477,11 @@ struct VirtualState {
 
 namespace detail {
 InlineResult BuildInline(const MarkdownNode& node, const MarkdownStyle& theme,
-                         const MarkdownLinkPolicy& policy, const std::set<unsigned>* revealed_spoilers) {
-  InlineBuilder builder{theme, policy, {}, {}, {}, {}, 0};
-  builder.revealed_spoilers = revealed_spoilers;
+                         const MarkdownLinkPolicy& policy, const std::set<unsigned>* revealed_spoilers, bool collect_source) {
+  InlineBuilder builder{.theme = theme, .policy = policy, .revealed_spoilers = revealed_spoilers, .collect_source = collect_source};
   builder.Visit(node);
   return {AttributedText::FromRanges(std::move(builder.text), std::move(builder.styles), std::move(builder.links)),
-          std::move(builder.originals)};
+          std::move(builder.originals), std::move(builder.source_segments)};
 }
 
 } // namespace detail

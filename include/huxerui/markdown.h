@@ -10,6 +10,8 @@
 #include <huxerui/view.h>
 #include <huxerui/scroll.h>
 
+#define HUXERUI_MARKDOWN_SOURCE_MAPPING 1
+
 namespace huxerui::markdown {
 
 /// Complete local appearance override, in DIPs. Omission in MarkdownOptions follows
@@ -64,6 +66,11 @@ using MarkdownAdmonitionRenderer = std::function<View(const MarkdownNode&)>;
 /// node.text is literal LaTeX without delimiters. Same borrowing/thread rules as
 /// other renderers. Mixed inline math always uses a literal monospace fallback.
 using MarkdownStandaloneMathRenderer = std::function<View(const MarkdownNode&)>;
+/// Decorates default text paragraphs, headings, table cells and code blocks during composition.
+/// The node, attributed text, style and source mapping are borrowed for the call. Parse with
+/// track_source_positions to populate segments. Custom block/image/math renderers own their views.
+using MarkdownTextDecorator = std::function<View(View, const MarkdownNode&, const AttributedText&,
+    const TextStyle&, TextAlign, std::span<const MarkdownSourceSegment>)>;
 
 /// Display configuration only. Set ParseOptions with ParseMarkdown before rendering.
 struct MarkdownOptions {
@@ -82,6 +89,7 @@ struct MarkdownOptions {
   /// Optional application-owned formula backend. Default displays literal LaTeX,
   /// not mathematical typesetting; does not replace math mixed with other text.
   MarkdownStandaloneMathRenderer standalone_math_renderer;
+  MarkdownTextDecorator decorate_text;
 };
 
 /// Owned link information. Destination preserves decoded relative paths, anchors and Unicode.

@@ -14,6 +14,21 @@ using namespace huxerui::markdown;
 
 #ifdef MARKDOWN_HAS_UI_TESTING
 std::string activated;
+constexpr std::string_view mapped_source = "||hidden||\n\n```\ncode\n```";
+bool decorated_spoiler = false, decorated_code = false;
+
+View MappedMarkdown() {
+  return Markdown(ParseMarkdown(mapped_source, {.spoilers = true, .track_source_positions = true}), {
+      .decorate_text = [](View view, const MarkdownNode& node, const AttributedText& text,
+          const TextStyle&, TextAlign, std::span<const MarkdownSourceSegment> segments) {
+        const auto ranges = ResolveMarkdownSourceRanges(text.PlainText(), segments, 0, text.PlainText().size());
+        CHECK(ranges && ranges->size() == 1);
+        CHECK(mapped_source.substr(ranges->front().begin, ranges->front().end - ranges->front().begin) == text.PlainText());
+        decorated_spoiler |= node.kind == NodeKind::Paragraph;
+        decorated_code |= node.kind == NodeKind::CodeBlock;
+        return view;
+      }});
+}
 #endif
 
 int main() { return Run([] {
@@ -54,6 +69,12 @@ int main() { return Run([] {
   CHECK(image_link.text.PlainText() == ParseMarkdown("[![alt [inside](https://inner.example)](image.png)](https://outer.example)").PlainText());
   CHECK(image_link.links.size() == 1);
   CHECK(image_link.links[0].destination == "https://outer.example");
+  const auto mapped_doc = ParseMarkdown("a ||[b](url)|| ![alt](image.png)",
+      {.spoilers = true, .track_source_positions = true});
+  const auto mapped_inline = markdown::detail::BuildInline(mapped_doc.Root().children.front(), theme, {}, nullptr, true);
+  CHECK(mapped_inline.text.PlainText() == "a b alt");
+  CHECK((ResolveMarkdownSourceRanges(mapped_inline.text.PlainText(), mapped_inline.source_segments, 2, 7) ==
+         std::vector<MarkdownSourceRange>{{5, 6}, {14, 15}, {17, 20}}));
 
   LIB_MARKDOWN_DISCARD(Markdown(MarkdownDocument{}));
   auto invalid = MarkdownStyle{};
@@ -88,5 +109,9 @@ int main() { return Run([] {
   CHECK(ui.Find(UiSelector::Text("Updated")).Exists());
   CHECK(!ui.Find(UiSelector::Text("Native")).Exists());
   ui.PumpAndSettle();
+
+  Application mapped_app(MappedMarkdown);
+  UiTest mapped_ui(mapped_app);
+  CHECK(decorated_spoiler && decorated_code);
 #endif
 }); }

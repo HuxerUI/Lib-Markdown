@@ -428,7 +428,7 @@ md_text_with_null_replacement(MD_CTX* ctx, MD_TEXTTYPE type, const CHAR* str, SZ
         }
 
         if(off < size) {
-            ret = ctx->parser.text(MD_TEXT_NULLCHAR, _T(""), 1, ctx->userdata);
+            ret = ctx->parser.text(MD_TEXT_NULLCHAR, str + off, 1, ctx->userdata);
             if(ret != 0)
                 return ret;
             off++;
@@ -522,6 +522,23 @@ md_text_with_null_replacement(MD_CTX* ctx, MD_TEXTTYPE type, const CHAR* str, SZ
             }                                                               \
         }                                                                   \
     } while(0)
+
+
+static void
+md_report_eol_source(MD_CTX* ctx, OFF off)
+{
+    OFF end;
+    if(ctx->parser.normalized_text_source == NULL)
+        return;
+    while(off < ctx->size && ISBLANK(off))
+        off++;
+    if(off >= ctx->size || !ISNEWLINE(off))
+        return;
+    end = off + 1;
+    if(CH(off) == _T('\r') && end < ctx->size && CH(end) == _T('\n'))
+        end++;
+    ctx->parser.normalized_text_source(off, end, ctx->userdata);
+}
 
 
 /* If the offset falls into a gap between line, we return the following
@@ -4873,7 +4890,7 @@ md_process_inlines(MD_CTX* ctx, const MD_LINE* lines, MD_SIZE n_lines)
     OFF off = lines[0].beg;
     OFF end = lines[n_lines-1].end;
     OFF tmp;
-    int enforce_hardbreak = 0;
+    OFF hardbreak_source = 0;
     int ret = 0;
 
     /* Find first resolved mark. Note there is always at least one resolved
@@ -4899,9 +4916,12 @@ md_process_inlines(MD_CTX* ctx, const MD_LINE* lines, MD_SIZE n_lines)
             switch(mark->ch) {
                 case '\\':      /* Backslash escape. */
                     if(ISNEWLINE(mark->beg+1))
-                        enforce_hardbreak = 1;
-                    else
+                        hardbreak_source = mark->beg+1;
+                    else {
+                        if(ctx->parser.normalized_text_source != NULL)
+                            ctx->parser.normalized_text_source(mark->beg, mark->end, ctx->userdata);
                         MD_TEXT(text_type, STR(mark->beg+1), 1);
+                    }
                     break;
 
                 case ' ':       /* Non-trivial space. */
@@ -5135,7 +5155,7 @@ md_process_inlines(MD_CTX* ctx, const MD_LINE* lines, MD_SIZE n_lines)
                     break;
 
                 case '\0':
-                    MD_TEXT(MD_TEXT_NULLCHAR, _T(""), 1);
+                    MD_TEXT(MD_TEXT_NULLCHAR, STR(mark->beg), 1);
                     break;
 
                 case 127:
@@ -5173,8 +5193,10 @@ md_process_inlines(MD_CTX* ctx, const MD_LINE* lines, MD_SIZE n_lines)
                  * space when the line ends in whitespace, because the loop
                  * above advances off past line->end over the trailing blanks
                  * (CommonMark code-span examples 335, 337, 640). */
-                if(off < mark->beg  &&  ISNEWLINE(off))
+                if(off < mark->beg  &&  ISNEWLINE(off)) {
+                    md_report_eol_source(ctx, off);
                     MD_TEXT(text_type, _T(" "), 1);
+                }
             } else if(text_type == MD_TEXT_HTML) {
                 /* Inside raw HTML, we output the new line verbatim, including
                  * any trailing spaces. */
@@ -5183,13 +5205,14 @@ md_process_inlines(MD_CTX* ctx, const MD_LINE* lines, MD_SIZE n_lines)
                     tmp++;
                 if(tmp > off)
                     MD_TEXT(MD_TEXT_HTML, STR(off), tmp - off);
+                md_report_eol_source(ctx, tmp);
                 MD_TEXT(MD_TEXT_HTML, _T("\n"), 1);
             } else {
                 /* Output soft or hard line break. */
                 MD_TEXTTYPE break_type = MD_TEXT_SOFTBR;
 
                 if(text_type == MD_TEXT_NORMAL) {
-                    if(enforce_hardbreak  ||  (ctx->parser.flags & MD_FLAG_HARD_SOFT_BREAKS)) {
+                    if(hardbreak_source  ||  (ctx->parser.flags & MD_FLAG_HARD_SOFT_BREAKS)) {
                         break_type = MD_TEXT_BR;
                     } else {
                         while(off < ctx->size  &&  ISBLANK(off))
@@ -5199,6 +5222,7 @@ md_process_inlines(MD_CTX* ctx, const MD_LINE* lines, MD_SIZE n_lines)
                     }
                 }
 
+                md_report_eol_source(ctx, hardbreak_source ? hardbreak_source : off);
                 MD_TEXT(break_type, _T("\n"), 1);
             }
 
@@ -5206,7 +5230,7 @@ md_process_inlines(MD_CTX* ctx, const MD_LINE* lines, MD_SIZE n_lines)
             line++;
             off = MAX(off, line->beg);
 
-            enforce_hardbreak = 0;
+            hardbreak_source = 0;
         }
     }
 
@@ -5464,6 +5488,7 @@ md_process_verbatim_block_contents(MD_CTX* ctx, MD_TEXTTYPE text_type, const MD_
         MD_TEXT_INSECURE(text_type, STR(line->beg), line->end - line->beg);
 
         /* Enforce end-of-line. */
+        md_report_eol_source(ctx, line->end);
         MD_TEXT(text_type, _T("\n"), 1);
     }
 

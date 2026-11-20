@@ -4,6 +4,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -24,6 +25,24 @@ enum class AdmonitionKind { Note, Tip, Important, Warning, Caution };
 
 /// Source alignment for a table cell. Default uses leading paragraph alignment.
 enum class CellAlignment { Default, Left, Center, Right };
+
+/// Half-open UTF-8 byte range in the exact input used to produce a snapshot.
+struct MarkdownSourceRange {
+  std::size_t begin = 0;
+  std::size_t end = 0;
+  bool operator==(const MarkdownSourceRange&) const = default;
+};
+
+/// Maps a half-open UTF-8 interval in visible text to bytes in the source.
+/// Transformed segments (such as decoded entities) map as indivisible tokens.
+struct MarkdownSourceSegment {
+  std::size_t text_begin = 0;
+  std::size_t text_end = 0;
+  std::size_t source_begin = 0;
+  std::size_t source_end = 0;
+  bool transformed = false;
+  bool operator==(const MarkdownSourceSegment&) const = default;
+};
 
 /// Owned UTF-8 syntax tree. No node borrows the input or MD4C callback storage.
 struct MarkdownNode {
@@ -59,6 +78,8 @@ struct MarkdownNode {
   unsigned footnote_reference_count = 0;
   /// BlankLines: count reported by MD4C; not a source position or byte offset.
   unsigned blank_line_count = 0;
+  /// Ordered segments relative to text. Gaps represent bytes without a source.
+  std::vector<MarkdownSourceSegment> source_segments;
 
   bool operator==(const MarkdownNode&) const = default;
 };
@@ -108,6 +129,8 @@ struct ParseOptions {
   std::size_t max_input_bytes = 8 * 1024 * 1024;
   /// Positive nesting limit, default 128, maximum 512; exceeded depth throws length_error.
   std::size_t max_nesting = 128;
+  /// Collect literal text mappings. Source offsets are absolute within the input snapshot.
+  bool track_source_positions = false;
   bool operator==(const ParseOptions&) const = default;
   /// Syntax presets; raw HTML remains literal in both. Individual fields remain
   /// editable. CommonMark disables optional GFM/bare autolinks; GitHub enables
@@ -252,5 +275,19 @@ private:
 
 /// Visible content of a node; inline markup is removed, images contribute alt text.
 [[nodiscard]] std::string PlainText(const MarkdownNode& node);
+
+struct MarkdownMappedText {
+  std::string text;
+  std::vector<MarkdownSourceSegment> source_segments;
+};
+
+/// Flattens PlainText and rebases its segments into the flattened string.
+[[nodiscard]] MarkdownMappedText PlainTextWithSource(const MarkdownNode& node);
+
+/// Resolves a UTF-8 text selection into source ranges in display order. Adjacent source
+/// ranges are merged. Pass the segments collected for this text by the parser or renderer.
+/// Returns nullopt for empty, invalid, or partially unmapped selections.
+[[nodiscard]] std::optional<std::vector<MarkdownSourceRange>> ResolveMarkdownSourceRanges(
+    std::string_view text, std::span<const MarkdownSourceSegment> segments, std::size_t begin, std::size_t end);
 
 } // namespace huxerui::markdown

@@ -105,6 +105,8 @@ struct Builder {
   MarkdownNode root{.kind = NodeKind::Document};
   std::vector<MarkdownNode*> stack{&root};
   std::string_view source;
+  std::size_t source_base = 0;
+  std::optional<MarkdownSourceRange> normalized_source;
   std::vector<Restart> restarts;
   bool implicit_paragraph = false;
   bool first_content = true;
@@ -139,6 +141,25 @@ struct Builder {
     if (!implicit_paragraph) return;
     Pop();
     implicit_paragraph = false;
+  }
+
+  std::optional<MarkdownSourceRange> TextSource(const char* data, std::size_t size) {
+    if (!options.track_source_positions) return {};
+    if (normalized_source) return std::exchange(normalized_source, {});
+    const auto base = reinterpret_cast<std::uintptr_t>(source.data());
+    const auto pointer = reinterpret_cast<std::uintptr_t>(data);
+    if (pointer < base || pointer - base > source.size() || size > source.size() - (pointer - base)) return {};
+    const auto begin = static_cast<std::size_t>(pointer - base);
+    return MarkdownSourceRange{begin, begin + size};
+  }
+
+  void AppendText(MarkdownNode& node, std::string_view text, std::optional<MarkdownSourceRange> range) const {
+    if (range && !text.empty()) {
+      const auto [begin, end] = *range;
+      node.source_segments.push_back({node.text.size(), node.text.size() + text.size(),
+          source_base + begin, source_base + end, source.substr(begin, end - begin) != text});
+    }
+    node.text += text;
   }
 
   void RecordRestart(MD_TEXTTYPE type, const char* text) {
@@ -316,37 +337,54 @@ int LeaveSpan(MD_SPANTYPE, void*, void* context) noexcept {
   return 0;
 }
 
+void AppendCollapsedText(Builder& builder, MarkdownNode& node, std::string_view text,
+                         std::optional<MarkdownSourceRange> range) {
+  const auto blank = [](char c) { return c == ' ' || c == '\t' || c == '\v' || c == '\f'; };
+  for (std::size_t begin = 0; begin < text.size();) {
+    const bool space = blank(text[begin]);
+    auto end = begin + 1;
+    while (end < text.size() && blank(text[end]) == space) ++end;
+    if (!space || !builder.collapsed_space) {
+      const auto part = range ? std::optional{MarkdownSourceRange{range->begin + begin, range->begin + end}} : std::nullopt;
+      builder.AppendText(node, space ? std::string_view{" "} : text.substr(begin, end - begin), part);
+    }
+    builder.collapsed_space = space;
+    begin = end;
+  }
+}
+
 int TextCallback(MD_TEXTTYPE type, const MD_CHAR* data, MD_SIZE size, void* context) noexcept {
   auto& b = *static_cast<Builder*>(context);
   return b.Guard([&] {
     b.RecordRestart(type, data);
     b.OpenImplicitParagraph();
-    std::string text;
+    const auto range = b.TextSource(data, size);
+    auto& parent = *b.stack.back();
+    auto* node = &parent;
+    if (parent.kind != NodeKind::CodeBlock && parent.kind != NodeKind::Code &&
+        parent.kind != NodeKind::InlineMath && parent.kind != NodeKind::DisplayMath) {
+      if (parent.children.empty() || parent.children.back().kind != NodeKind::Text)
+        parent.children.emplace_back();
+      node = &parent.children.back();
+    }
+    // The vendored MD4C collapse flag drops tab-started whitespace marks.
+    // Escaped punctuation keeps its original token range.
+    std::string_view text{data, size};
+    if (b.options.collapse_whitespace && type == MD_TEXT_NORMAL &&
+        (!range || range->end - range->begin == size)) {
+      AppendCollapsedText(b, *node, text, range);
+      return;
+    }
+    std::string decoded;
     switch (type) {
-    case MD_TEXT_ENTITY: text = DecodeEntity({data, size}); break;
+    case MD_TEXT_ENTITY: decoded = DecodeEntity(text); text = decoded; break;
     case MD_TEXT_NULLCHAR: text = "\xEF\xBF\xBD"; break;
     case MD_TEXT_BR: text = "\n"; break;
     case MD_TEXT_SOFTBR: text = b.options.soft_break_mode == SoftBreakMode::LineBreak ? "\n" : " "; break;
-    default: text.assign(data, size); break;
+    default: break;
     }
-    // The vendored MD4C collapse flag drops tab-started whitespace marks. Collapse
-    // ordinary text here instead, retaining code/math/entities and source offsets.
-    if (b.options.collapse_whitespace && type == MD_TEXT_NORMAL) {
-      std::string collapsed;
-      for (const char c : text) {
-        if (c == ' ' || c == '\t' || c == '\v' || c == '\f') {
-          if (!b.collapsed_space) collapsed += ' ';
-          b.collapsed_space = true;
-        } else { collapsed += c; b.collapsed_space = false; }
-      }
-      text = std::move(collapsed);
-    } else b.collapsed_space = type == MD_TEXT_SOFTBR && text == " ";
-    auto& parent = *b.stack.back();
-    if (parent.kind == NodeKind::CodeBlock || parent.kind == NodeKind::Code ||
-        parent.kind == NodeKind::InlineMath || parent.kind == NodeKind::DisplayMath) parent.text += text;
-    else if (!parent.children.empty() && parent.children.back().kind == NodeKind::Text)
-      parent.children.back().text += text;
-    else parent.children.push_back(MarkdownNode{.kind = NodeKind::Text, .text = std::move(text)});
+    b.collapsed_space = type == MD_TEXT_SOFTBR && text == " ";
+    b.AppendText(*node, text, range);
   });
 }
 
@@ -364,15 +402,22 @@ bool IsBlock(NodeKind kind) {
   }
 }
 
-void CollectText(const MarkdownNode& node, std::string& out) {
+void CollectText(const MarkdownNode& node, std::string& out, std::vector<MarkdownSourceSegment>* segments = nullptr) {
   if (node.kind == NodeKind::BlankLines) {
     out.append(node.blank_line_count, '\n');
     return;
   }
+  if (segments) {
+    for (auto segment : node.source_segments) {
+      segment.text_begin += out.size();
+      segment.text_end += out.size();
+      segments->push_back(segment);
+    }
+  }
   out += node.text;
   for (std::size_t i = 0; i < node.children.size(); ++i) {
     if (i && IsBlock(node.children[i].kind) && !out.empty() && out.back() != '\n') out += '\n';
-    CollectText(node.children[i], out);
+    CollectText(node.children[i], out, segments);
   }
 }
 
@@ -391,11 +436,17 @@ struct ParsedSource {
   std::vector<Builder::Restart> restarts;
 };
 
-ParsedSource ParseValidatedSource(std::string_view source, const ParseOptions& options) {
+ParsedSource ParseValidatedSource(std::string_view source, const ParseOptions& options, std::size_t source_base = 0) {
   Builder builder;
   builder.source = source;
+  builder.source_base = source_base;
   builder.options = options;
   MD_PARSER parser{};
+  if (options.track_source_positions) {
+    parser.normalized_text_source = [](MD_OFFSET begin, MD_OFFSET end, void* context) {
+      static_cast<Builder*>(context)->normalized_source = MarkdownSourceRange{begin, end};
+    };
+  }
   parser.flags = MD_FLAG_NOHTML;
   if (options.tables) parser.flags |= MD_FLAG_TABLES;
   if (options.strikethrough) parser.flags |= MD_FLAG_STRIKETHROUGH;
@@ -456,6 +507,33 @@ std::string PlainText(const MarkdownNode& node) {
   return out;
 }
 
+MarkdownMappedText PlainTextWithSource(const MarkdownNode& node) {
+  MarkdownMappedText result;
+  CollectText(node, result.text, &result.source_segments);
+  return result;
+}
+
+std::optional<std::vector<MarkdownSourceRange>> ResolveMarkdownSourceRanges(
+    std::string_view text, std::span<const MarkdownSourceSegment> segments, std::size_t begin, std::size_t end) {
+  const auto boundary = [text](std::size_t offset) {
+    return offset == text.size() || (static_cast<unsigned char>(text[offset]) & 0xc0) != 0x80;
+  };
+  if (begin >= end || end > text.size() || !boundary(begin) || !boundary(end)) return {};
+  std::vector<MarkdownSourceRange> result;
+  for (const auto& segment : segments) {
+    if (segment.text_end <= begin) continue;
+    if (segment.text_begin > begin) break;
+    const auto last = std::min(end, segment.text_end);
+    const auto first_byte = segment.transformed ? segment.source_begin : segment.source_begin + (begin - segment.text_begin);
+    const auto last_byte = segment.transformed ? segment.source_end : segment.source_begin + (last - segment.text_begin);
+    if (!result.empty() && result.back().end == first_byte) result.back().end = last_byte;
+    else result.push_back({first_byte, last_byte});
+    if (last == end) return result;
+    begin = last;
+  }
+  return {};
+}
+
 MarkdownDocument ParseMarkdown(std::string_view source, ParseOptions options) {
   ValidateInput(source, options);
   auto parsed = ParseValidatedSource(source, options);
@@ -505,7 +583,7 @@ MarkdownDocument MarkdownParseSession::Update(std::string_view source, const Val
     }
   }
   std::string owned_source(source);
-  auto parsed = ParseValidatedSource(std::string_view(owned_source).substr(restart_byte), impl_->options);
+  auto parsed = ParseValidatedSource(std::string_view(owned_source).substr(restart_byte), impl_->options, restart_byte);
   std::vector<Builder::Restart> restarts;
   if (retained) {
     MarkdownNode combined{.kind = NodeKind::Document};

@@ -12,7 +12,47 @@ const MarkdownNode& Find(const MarkdownNode& node, NodeKind kind) {
   throw std::out_of_range("Node not found");
 }
 
+void CheckSourceMapping() {
+  const auto resolve = [](const MarkdownMappedText& mapped, std::size_t begin, std::size_t end) {
+    return ResolveMarkdownSourceRanges(mapped.text, mapped.source_segments, begin, end);
+  };
+  const std::string_view link = "[接口说明](https://example.com)";
+  const auto mapped = PlainTextWithSource(ParseMarkdown(link, {.track_source_positions = true}).Root());
+  CHECK(mapped.text == "接口说明");
+  CHECK((resolve(mapped, 0, 12) == std::vector<MarkdownSourceRange>{{1, 13}}));
+  CHECK((resolve(mapped, 6, 12) == std::vector<MarkdownSourceRange>{{7, 13}}));
+  CHECK(!resolve(mapped, 7, 12));
+  CHECK(PlainTextWithSource(ParseMarkdown(link).Root()).source_segments.empty());
+
+  const auto collapsed = PlainTextWithSource(ParseMarkdown("A  B &amp; \\*", {
+      .collapse_whitespace = true, .track_source_positions = true}).Root());
+  CHECK(collapsed.text == "A B & *");
+  CHECK((resolve(collapsed, 1, 2) == std::vector<MarkdownSourceRange>{{1, 3}}));
+  CHECK((resolve(collapsed, 2, 3) == std::vector<MarkdownSourceRange>{{3, 4}}));
+  CHECK((resolve(collapsed, 4, 5) == std::vector<MarkdownSourceRange>{{5, 10}}));
+  CHECK((resolve(collapsed, 6, 7) == std::vector<MarkdownSourceRange>{{11, 13}}));
+
+  const auto multiline = PlainTextWithSource(ParseMarkdown("> A\r\n> B", {.track_source_positions = true}).Root());
+  CHECK(multiline.text == "A B");
+  CHECK((resolve(multiline, 0, 3) == std::vector<MarkdownSourceRange>{{2, 5}, {7, 8}}));
+
+  const auto hard_breaks = PlainTextWithSource(ParseMarkdown("A\\\nB\\\r\nC  \r\nD",
+      {.track_source_positions = true}).Root());
+  CHECK(hard_breaks.text == "A\nB\nC\nD");
+  CHECK((resolve(hard_breaks, 1, 2) == std::vector<MarkdownSourceRange>{{2, 3}}));
+  CHECK((resolve(hard_breaks, 3, 4) == std::vector<MarkdownSourceRange>{{5, 7}}));
+  CHECK((resolve(hard_breaks, 5, 6) == std::vector<MarkdownSourceRange>{{10, 12}}));
+
+  const std::string code("```\r\na\0\0b", 9);
+  const auto verbatim = PlainTextWithSource(ParseMarkdown(code, {.track_source_positions = true}).Root());
+  CHECK(verbatim.text == "a\xEF\xBF\xBD\xEF\xBF\xBD" "b\n");
+  CHECK((resolve(verbatim, 1, 4) == std::vector<MarkdownSourceRange>{{6, 7}}));
+  CHECK((resolve(verbatim, 4, 7) == std::vector<MarkdownSourceRange>{{7, 8}}));
+  CHECK(!resolve(verbatim, 0, verbatim.text.size()));
+}
+
 int main() { return Run([] {
+  CheckSourceMapping();
   const auto empty = ParseMarkdown("");
   CHECK(empty.Root().children.empty());
   CHECK(empty.PlainText().empty());

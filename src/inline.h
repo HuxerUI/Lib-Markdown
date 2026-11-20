@@ -18,9 +18,11 @@ struct OriginalLink {
 struct InlineResult {
   AttributedText text;
   std::vector<OriginalLink> links;
+  std::vector<MarkdownSourceSegment> source_segments;
 };
 
 InlineResult BuildInline(const MarkdownNode& node, const MarkdownStyle& theme,
-                         const MarkdownLinkPolicy& policy = {}, const std::set<unsigned>* revealed_spoilers = nullptr);
+                         const MarkdownLinkPolicy& policy = {}, const std::set<unsigned>* revealed_spoilers = nullptr,
+                         bool collect_source = false);
 
 } // namespace huxerui::markdown::detail

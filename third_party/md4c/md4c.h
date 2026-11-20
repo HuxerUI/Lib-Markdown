@@ -475,6 +475,9 @@ typedef struct MD_PARSER {
      * Multi-line ranges can contain intervening container prefixes. */
     int (*block_source)(MD_BLOCKTYPE /*type*/, MD_OFFSET /*beg*/, MD_OFFSET /*end*/,
                         MD_OFFSET /*syntax_end*/, MD_SIZE /*line_count*/, void* /*userdata*/);
+
+    /* Optional source interval for a transformed token, reported just before text(). */
+    void (*normalized_text_source)(MD_OFFSET /*beg*/, MD_OFFSET /*end*/, void* /*userdata*/);
 } MD_PARSER;
 
 

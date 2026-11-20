@@ -53,6 +53,17 @@ int main() { return Run([] {
   CHECK(changed.Root() == ParseMarkdown(large).Root());
   CHECK(session.LastParseStats().mode == MarkdownParseMode::Incremental);
 
+  const ParseOptions track{.track_source_positions = true};
+  MarkdownParseSession mapped_session(track);
+  const std::string prefix = "# Header\r\n\r\n# Tail\r\n\r\n";
+  const auto mapped_before = mapped_session.Update(prefix + "[old](url)");
+  Equivalent(mapped_session, prefix + "[new😀](url)", track);
+  CHECK(mapped_session.LastParseStats().mode == MarkdownParseMode::Incremental);
+  const auto mapped = PlainTextWithSource(mapped_session.Document().Root().children.back());
+  CHECK((ResolveMarkdownSourceRanges(mapped.text, mapped.source_segments, 3, 7) ==
+         std::vector<MarkdownSourceRange>{{prefix.size() + 4, prefix.size() + 8}}));
+  CHECK(mapped_before.Root() == ParseMarkdown(prefix + "[old](url)", track).Root());
+
   const std::vector<std::string> seeds{
     "# Start\n\nAlpha\nsecond line\n\n## Next\n\nBeta\n",
     "plain\n\nsecond paragraph\ncontinuation\n\nthird paragraph\n",
