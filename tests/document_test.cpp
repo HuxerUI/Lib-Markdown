@@ -71,6 +71,7 @@ int main() { return Run([] {
       "& \xC2\xA9 \xF0\x9F\x98\x80 \xF0\x9F\x98\x80 \xE2\x89\x82\xCC\xB8 &unknown;");
   CHECK(ParseMarkdown("&#0; &#xD800; &#x110000;").PlainText() == "\xEF\xBF\xBD \xEF\xBF\xBD \xEF\xBF\xBD");
   CHECK(ParseMarkdown(std::string("a\0b", 3)).PlainText() == "a\xEF\xBF\xBD" "b");
+  CHECK(ParseMarkdown(std::string("```\na\0\0b", 8)).PlainText() == "a\xEF\xBF\xBD\xEF\xBF\xBD" "b\n");
   CHECK(ParseMarkdown("<script>alert(1)</script>").PlainText() == "<script>alert(1)</script>");
   CHECK(ParseMarkdown("one\ntwo  \nthree").PlainText() == "one two\nthree");
   CHECK(ParseMarkdown("one\ntwo", {.soft_break_mode = SoftBreakMode::LineBreak}).PlainText() == "one\ntwo");
