@@ -5,6 +5,8 @@
 /examples/*/dist/
 /.vs/
 /.idea/
+/.vscode/
+/.agents/
 /CMakeUserPresets.json
 /compile_commands.json
 /traces/
