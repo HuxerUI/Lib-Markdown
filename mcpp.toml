@@ -1,0 +1,29 @@
+[package]
+namespace   = "huxerui"
+name        = "markdown"
+version     = "0.3.1"
+standard    = "c++23"
+license     = "MIT"
+repo        = "https://github.com/HuxerUI/Lib-Markdown"
+description = "Native CommonMark and GFM Markdown parser and declarative view component for HuxerUI"
+
+[package.metadata.huxerui]
+library   = "HuxerUI::Markdown"
+name      = "markdown"
+id        = "org.huxerui.markdown"
+namespace = "huxerui::markdown"
+
+[dependencies]
+huxerui.huxerui = "0.5.5"
+
+[targets.huxerui_markdown]
+kind = "lib"
+
+[lib]
+path = "modules/markdown.cppm"
+
+[build]
+sources              = ["third_party/md4c/md4c.c", "third_party/md4c/entity.c"]
+c_standard           = "c99"
+include_dirs         = ["include", "third_party/md4c"]
+private_include_dirs = ["third_party/md4c"]
