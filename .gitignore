@@ -1,6 +1,10 @@
 /build*/
 /.cache/
 /.huxerui/
+/.mcpp/
+/target/
+/gcm.cache/
+/mcpp.lock
 /examples/*/.huxerui/
 /examples/*/dist/
 /.vs/
