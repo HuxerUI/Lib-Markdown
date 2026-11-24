@@ -1,9 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.3.1 (2026-11-24)
 
 - Track official HuxerUI main commit `8d2bcea1` (0.4.0 development line; no
   v0.4.0 tag yet). Parser and view tests pass against it unchanged.
+- Map rendered text to source byte ranges (`HUXERUI_MARKDOWN_SOURCE_MAPPING`).
+- Fix `md4c` emitting NUL bytes as code text.
+- Add native `mcpp` and C++23 module (`huxerui.markdown`) support targeting
+  `huxerui.huxerui` `0.5.5`.
 
 ## 0.3.0 (2026-11-09)
 
